@@ -24,15 +24,34 @@ def _show(frame) -> None:
         print(frame)
 
 
+def _configured_profiles() -> list[str]:
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read(Path.home() / ".databrickscfg")
+    return [s for s in parser.sections() if s != "__settings__"]
+
+
+def _check_profile(args) -> None:
+    if args.profile and args.profile not in _configured_profiles():
+        available = ", ".join(_configured_profiles()) or "(none)"
+        raise SystemExit(
+            f"unknown Databricks profile {args.profile!r}; available in ~/.databrickscfg: {available}\n"
+            "tip: export DATABRICKS_CONFIG_PROFILE=<profile> to stop passing --profile"
+        )
+
+
 def _spark(args):
     from doc_intelligence.runtime import get_spark
 
+    _check_profile(args)
     return get_spark(args.profile)
 
 
 def _client(args):
     from doc_intelligence.runtime import get_workspace_client
 
+    _check_profile(args)
     return get_workspace_client(args.profile)
 
 
