@@ -28,7 +28,9 @@ def test_chunking_overrides_are_validated():
 def test_config_loads_nested_sections(wsp_config):
     assert wsp_config.document_type == "wsp"
     assert wsp_config.source.volume == "/Volumes/workspace/default/raw"
-    assert wsp_config.source.link_pattern == "[.]pdf$"
+    assert wsp_config.source.link_pattern == "[.]pdf($|[?])"
+    assert wsp_config.source.listing_url.startswith("https://www.water.dcceew.nsw.gov.au/")
+    assert "rule_summary" in wsp_config.source.supporting_kinds
     assert wsp_config.tables.rules == "wsp_rules"
     assert wsp_config.rules_full_name == "workspace.default.wsp_rules"
     assert wsp_config.chunks_index_full_name == "workspace.default.wsp_chunks_index"

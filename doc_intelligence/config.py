@@ -14,6 +14,15 @@ class SourceConfig:
     file_pattern: str
     listing_url: str | None
     link_pattern: str
+    # hub -> sub-pages that list the documents (regex on the href); None = hub lists them directly
+    region_link_pattern: str | None = None
+    # links to the document itself (regex on the href) vs. supporting material
+    instrument_link_pattern: str | None = None
+    instrument_anchor_prefix: str | None = None
+    allowed_domains: tuple[str, ...] = ()
+    # supporting-document kind -> anchor-text keywords
+    supporting_kinds: Mapping[str, tuple[str, ...]] = MappingProxyType({})
+    max_downloads: int = 20
 
 
 @dataclass(frozen=True)
@@ -189,7 +198,15 @@ def config_from_dict(raw: dict) -> DocumentTypeConfig:
             volume=source["volume"].rstrip("/"),
             file_pattern=source["file_pattern"],
             listing_url=source.get("listing_url"),
-            link_pattern=source.get("link_pattern", "[.]pdf$"),
+            link_pattern=source.get("link_pattern") or "[.]pdf($|[?])",
+            region_link_pattern=source.get("region_link_pattern"),
+            instrument_link_pattern=source.get("instrument_link_pattern"),
+            instrument_anchor_prefix=source.get("instrument_anchor_prefix"),
+            allowed_domains=tuple(source.get("allowed_domains") or ()),
+            supporting_kinds=MappingProxyType(
+                {kind: tuple(keywords) for kind, keywords in (source.get("supporting_kinds") or {}).items()}
+            ),
+            max_downloads=int(source.get("max_downloads", 20)),
         ),
         tables=TablesConfig(**raw["tables"]),
         models=ModelsConfig(**raw["models"]),

@@ -7,10 +7,27 @@ schema: default
 source:
   volume: /Volumes/workspace/default/raw
   file_pattern: "WSP_%"
-  # Page listing the source PDFs, polled by the change-detection agent.
-  # Leave null to disable remote discovery (manual uploads to the volume only).
-  listing_url: null
-  link_pattern: '[.]pdf$'
+  # Department hub page. Region sub-pages carry one heading per plan, each with a
+  # "Read:" link to the instrument on legislation.nsw.gov.au (which blocks scripted
+  # downloads, so instruments are fetched via the user's browser) and links to
+  # supporting documents hosted on the department site (fetchable).
+  listing_url: https://www.water.dcceew.nsw.gov.au/our-work/plans-and-strategies/water-sharing-plans
+  link_pattern: '[.]pdf($|[?])'
+  region_link_pattern: '/water-sharing-plans/[a-z0-9-]+-region$'
+  instrument_link_pattern: 'legislation[.]nsw[.]gov[.]au'
+  instrument_anchor_prefix: "Read:"
+  allowed_domains: [www.water.dcceew.nsw.gov.au, legislation.nsw.gov.au, www.legislation.nsw.gov.au, gazette.nsw.gov.au, publications.water.nsw.gov.au]
+  # anchor-text keywords -> supporting document kind
+  supporting_kinds:
+    changes_fact_sheet: [changes to, summary of changes]
+    rule_summary: [rule summary]
+    background: [background document]
+    map: [plan map, gde map]
+    compliance: [compliance with water management principles]
+    nrc_review: [nrc review, nrc recommendations]
+    what_we_heard: [what we heard, summary of submissions]
+    gazette: [gazette, suspension]
+  max_downloads: 20
 
 tables:
   parsed_docs: wsp_parsed_docs

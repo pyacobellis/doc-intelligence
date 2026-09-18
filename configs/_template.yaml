@@ -17,8 +17,17 @@ source:
   volume: __VOLUME__
   file_pattern: "__FILE_PATTERN__"
   # Listing page polled by `doc-intel check-source`; null disables remote discovery.
+  # If the hub links to sub-pages that list the documents, region_link_pattern selects
+  # them; instrument_link_pattern marks links to the document itself; supporting_kinds
+  # classify other links by anchor text.
   listing_url: null
-  link_pattern: '[.]pdf$'
+  link_pattern: '[.]pdf($|[?])'
+  region_link_pattern: null
+  instrument_link_pattern: null
+  instrument_anchor_prefix: null
+  allowed_domains: []
+  supporting_kinds: {}
+  max_downloads: 20
 
 tables:
   parsed_docs: __DOCTYPE___parsed_docs
