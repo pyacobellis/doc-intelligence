@@ -210,6 +210,25 @@ def cmd_check_source(args, cfg):
         print("re-run `pipeline` to parse the new versions")
 
 
+def cmd_new_config(args, cfg):
+    from doc_intelligence.scaffold import new_document_type_config
+
+    paths = new_document_type_config(
+        args.document_type,
+        args.display_name,
+        configs_dir=Path(args.config).resolve().parent,
+        file_pattern=args.file_pattern,
+        volume=args.volume,
+        force=args.force,
+    )
+    for path in paths:
+        print(f"wrote {path}")
+    print(
+        "next: review the taxonomy/extraction sections, upload PDFs matching the file pattern "
+        f"to the volume, then run: doc-intel --config {paths[0]} pipeline"
+    )
+
+
 def cmd_cost(args, cfg):
     from doc_intelligence.monitoring import cost_report
 
@@ -279,6 +298,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("cost", help="AI-function DBU/cost and token usage from system tables")
     p.add_argument("--days", type=int, default=7)
     p.set_defaults(run=cmd_cost)
+
+    p = sub.add_parser("new-config", help="scaffold configs/<type>.yaml for a new document type")
+    p.add_argument("document_type", help="short lowercase id, e.g. award")
+    p.add_argument("--display-name", required=True, help='human name, e.g. "Modern Awards"')
+    p.add_argument("--file-pattern", default=None, help="SQL LIKE pattern for PDFs (default <TYPE>_%%)")
+    p.add_argument("--volume", default="/Volumes/workspace/default/raw")
+    p.add_argument("--force", action="store_true", help="overwrite existing files")
+    p.set_defaults(run=cmd_new_config)
     return parser
 
 

@@ -2,7 +2,8 @@
 # (parse -> chunk -> index -> extract-rules) and the Streamlit app.
 #   databricks bundle validate -t dev
 #   databricks bundle deploy   -t dev      # asks first: writes to the workspace
-#   databricks bundle run wsp_pipeline -t dev
+#   databricks bundle run doc_intel_pipeline -t dev
+#   databricks bundle run doc_intel_pipeline -t dev --params config_path=configs/<type>.yaml
 
 bundle:
   name: doc_intelligence
@@ -33,12 +34,17 @@ sync:
 
 resources:
   jobs:
-    wsp_pipeline:
-      name: "[${bundle.target}] doc-intel pipeline (wsp)"
+    # One pipeline job serves every document type: override the config_path job parameter
+    # at run time, e.g. `databricks bundle run doc_intel_pipeline --params config_path=configs/award.yaml`
+    doc_intel_pipeline:
+      name: "[${bundle.target}] doc-intel pipeline"
+      parameters:
+        - name: config_path
+          default: ${var.config_path}
       environments:
         - environment_key: default
           spec:
-            client: "2"
+            environment_version: "2"
             dependencies:
               - ./dist/*.whl
       tasks:
@@ -47,28 +53,28 @@ resources:
           python_wheel_task:
             package_name: doc_intelligence
             entry_point: doc-intel
-            parameters: ["--config", "${workspace.file_path}/${var.config_path}", "parse"]
+            parameters: ["--config", "${workspace.file_path}/{{job.parameters.config_path}}", "parse"]
         - task_key: chunk
           depends_on: [{ task_key: parse }]
           environment_key: default
           python_wheel_task:
             package_name: doc_intelligence
             entry_point: doc-intel
-            parameters: ["--config", "${workspace.file_path}/${var.config_path}", "chunk"]
+            parameters: ["--config", "${workspace.file_path}/{{job.parameters.config_path}}", "chunk"]
         - task_key: index
           depends_on: [{ task_key: chunk }]
           environment_key: default
           python_wheel_task:
             package_name: doc_intelligence
             entry_point: doc-intel
-            parameters: ["--config", "${workspace.file_path}/${var.config_path}", "index"]
+            parameters: ["--config", "${workspace.file_path}/{{job.parameters.config_path}}", "index"]
         - task_key: extract_rules
           depends_on: [{ task_key: chunk }]
           environment_key: default
           python_wheel_task:
             package_name: doc_intelligence
             entry_point: doc-intel
-            parameters: ["--config", "${workspace.file_path}/${var.config_path}", "extract-rules"]
+            parameters: ["--config", "${workspace.file_path}/{{job.parameters.config_path}}", "extract-rules"]
 
     wsp_check_source:
       name: "[${bundle.target}] doc-intel check source (wsp)"
@@ -80,7 +86,7 @@ resources:
       environments:
         - environment_key: default
           spec:
-            client: "2"
+            environment_version: "2"
             dependencies:
               - ./dist/*.whl
       tasks:

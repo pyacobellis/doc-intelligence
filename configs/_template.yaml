@@ -1,0 +1,139 @@
+# Template for a new document type. `doc-intel new-config <type> --display-name "..."`
+# copies this file with the __PLACEHOLDERS__ filled in. Everything the pipeline needs to
+# know about a document type lives here; the Python package stays untouched.
+#
+# The document identifier column in every table is called `plan_name` (named for the
+# first deployment); it is derived from the PDF file name without its extension.
+
+document_type: __DOCTYPE__
+display_name: __DISPLAY_NAME__
+
+catalog: workspace
+schema: default
+
+source:
+  # Volume the PDFs are uploaded to. Several document types can share one volume as long
+  # as their file patterns (SQL LIKE syntax) do not overlap.
+  volume: __VOLUME__
+  file_pattern: "__FILE_PATTERN__"
+  # Listing page polled by `doc-intel check-source`; null disables remote discovery.
+  listing_url: null
+  link_pattern: '[.]pdf$'
+
+tables:
+  parsed_docs: __DOCTYPE___parsed_docs
+  chunks: __DOCTYPE___chunks
+  rules: __DOCTYPE___rules
+  eval_results: __DOCTYPE___eval_results
+  document_versions: __DOCTYPE___document_versions
+  change_log: __DOCTYPE___change_log
+
+models:
+  llm: databricks-llama-4-maverick
+  embedding: databricks-gte-large-en
+
+vector_search:
+  # Endpoints can be shared across document types; each type gets its own index.
+  endpoint_name: wsp-vs-endpoint
+  index_name: __DOCTYPE___chunks_index
+  num_results: 5
+  query_type: HYBRID   # ANN (semantic only) or HYBRID (semantic + keyword)
+  rrf_k: 60
+
+parsing:
+  ai_parse_version: "2.0"
+
+chunking:
+  # ai_prep_search | section | fixed. `section` is the safe default for a new type: it
+  # needs no AI call and keeps chunks inside the embedding model's 512-token window.
+  strategy: section
+  header_keys_to_keep: [Sections, Section, Tables, Contains]
+  max_chars: 1600
+  overlap_chars: 200
+  variants:
+    ai_prep:
+      strategy: ai_prep_search
+    fixed_400:
+      strategy: fixed
+      max_chars: 1600
+      overlap_chars: 200
+
+extraction:
+  ai_extract_version: "2.1"
+  # Only chunks containing one of these words are sent to ai_extract (cost control).
+  chunk_keyword_filter: [limit, rate, must, shall, threshold, maximum, minimum, fee, allowance]
+  instructions: >-
+    Extract every concrete rule, limit, rate, threshold or obligation from this
+    __DISPLAY_NAME__ text. Include numeric values and units where present.
+  # These become both the ai_extract schema and the columns of the rules table.
+  fields:
+    - name: subject
+      type: string
+      description: What the rule is about (the thing being limited, priced, or required)
+    - name: condition
+      type: string
+      description: The condition or trigger under which the rule applies
+    - name: value
+      type: number
+      description: Numeric value (limit, rate, amount, duration)
+    - name: unit
+      type: string
+      description: Unit of measurement or currency (%, $, hours, days, ...)
+    - name: applies_to
+      type: string
+      description: Who or what the rule applies to
+    - name: section_reference
+      type: string
+      description: Section or clause reference if mentioned in the text
+  # Label columns in parsed tables are mapped onto rule fields by header keyword.
+  table_field_hints:
+    subject: [item, description, name]
+    condition: [condition, trigger, when]
+    applies_to: [category, class, applies to, type]
+
+# Canonical rule taxonomy: first rule type whose keywords match wins, so put specific
+# types first and `other` last. Replace these examples with the vocabulary of the new
+# document type.
+taxonomy:
+  rule_types:
+    limit:
+      description: Maximum or minimum amounts, caps and floors
+      keywords: [limit, maximum, minimum, cap, not exceed, at least]
+    rate:
+      description: Prices, rates, fees and percentages
+      keywords: [rate, fee, charge, price, per cent, percent, "%"]
+    obligation:
+      description: Things a party must or must not do
+      keywords: [must, shall, required, prohibited, must not]
+    timing:
+      description: Deadlines, durations and notice periods
+      keywords: [within, days, notice, deadline, period]
+    other:
+      description: Rules that do not fit another category
+      keywords: []
+  unit_aliases:
+    "%": ["%", percent, per cent]
+    "$": ["$", aud, dollars]
+    hours: [hour, hours, hr, hrs]
+    days: [day, days]
+    weeks: [week, weeks]
+
+qa:
+  system_prompt: >-
+    You are analysing __DISPLAY_NAME__ documents. Answer the question using only the
+    excerpts provided. Cite the document name for each point. If the excerpts do not
+    contain enough information, say so.
+  summary_prompt: >-
+    Summarise the key features of this __DISPLAY_NAME__ document in 5 bullet points.
+  change_summary_prompt: >-
+    You are comparing two versions of a __DISPLAY_NAME__ document. Describe what changed
+    between the previous and current version in plain language, grouped by topic, and
+    call out any changed numeric values.
+
+eval:
+  questions_file: configs/__DOCTYPE___eval_questions.yaml
+  judge_prompt: >-
+    You are grading an answer about __DISPLAY_NAME__ documents. Compare the candidate
+    answer to the reference answer. Reply with only a JSON object
+    {"score": <number between 0 and 1>, "reason": "<one sentence>"} where 1 means the
+    candidate fully matches the reference and 0 means it contradicts or misses it.

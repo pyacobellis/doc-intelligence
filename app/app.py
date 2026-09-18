@@ -18,21 +18,42 @@ from doc_intelligence.monitoring import cost_report  # noqa: E402
 from doc_intelligence.retrieval import answer_question, search_chunks, vector_retriever  # noqa: E402
 from doc_intelligence.runtime import get_workspace_client, warehouse_sql_runner  # noqa: E402
 
-CONFIG_PATH = os.environ.get("DOC_INTEL_CONFIG", "configs/wsp.yaml")
+CONFIGS_DIR = Path(__file__).resolve().parent.parent / "configs"
+DEFAULT_CONFIG = os.environ.get("DOC_INTEL_CONFIG", "configs/wsp.yaml")
+
+
+def available_configs() -> list[Path]:
+    """One entry per document type: configs/*.yaml minus the template and question files."""
+    return sorted(
+        p for p in CONFIGS_DIR.glob("*.yaml")
+        if not p.name.startswith("_") and not p.name.endswith("_eval_questions.yaml")
+    )
 
 
 @st.cache_resource
-def services():
-    cfg = load_document_type_config(CONFIG_PATH)
+def connection():
     w = get_workspace_client(os.environ.get("DATABRICKS_CONFIG_PROFILE"))
     warehouse_id = os.environ.get("DATABRICKS_WAREHOUSE_ID") or next(iter(w.warehouses.list())).id
-    return cfg, w, warehouse_sql_runner(w, warehouse_id)
+    return w, warehouse_sql_runner(w, warehouse_id)
 
 
-cfg, w, run_sql = services()
+@st.cache_resource
+def config_for(path: str):
+    return load_document_type_config(path)
 
-st.set_page_config(page_title=cfg.display_name, layout="wide")
+
+st.set_page_config(page_title="Document intelligence", layout="wide")
+choices = {p.stem: str(p) for p in available_configs()}
+default_key = Path(DEFAULT_CONFIG).stem if Path(DEFAULT_CONFIG).stem in choices else next(iter(choices))
+selected = st.sidebar.selectbox("Document type", list(choices), index=list(choices).index(default_key))
+cfg = config_for(choices[selected])
+w, run_sql = connection()
+if st.session_state.get("active_config") != selected:  # chat history belongs to one document type
+    st.session_state.messages = []
+    st.session_state.active_config = selected
+
 st.title(f"{cfg.display_name} — document intelligence")
+st.sidebar.caption(f"{cfg.chunks_full_name} · {cfg.rules_full_name}")
 
 ask_tab, rules_tab, changes_tab, cost_tab = st.tabs(["Ask", "Rules", "Changes", "Costs"])
 
