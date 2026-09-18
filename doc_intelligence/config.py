@@ -42,6 +42,13 @@ class VectorSearchConfig:
 
 
 @dataclass(frozen=True)
+class ChunkingConfig:
+    # None = leave ai_prep_search's "Key: value" header untouched; () = drop it entirely;
+    # otherwise keep only these keys in the embedded text (full header kept in chunk_header)
+    header_keys_to_keep: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True)
 class ExtractionField:
     name: str
     type: str
@@ -103,6 +110,7 @@ class DocumentTypeConfig:
     models: ModelsConfig
     vector_search: VectorSearchConfig
     ai_parse_version: str
+    chunking: ChunkingConfig
     extraction: ExtractionConfig
     taxonomy: TaxonomyConfig
     qa: QAConfig
@@ -171,6 +179,13 @@ def config_from_dict(raw: dict) -> DocumentTypeConfig:
             rrf_k=int(vs.get("rrf_k", 60)),
         ),
         ai_parse_version=str(raw.get("parsing", {}).get("ai_parse_version", "2.0")),
+        chunking=ChunkingConfig(
+            header_keys_to_keep=(
+                None
+                if (keep := (raw.get("chunking") or {}).get("header_keys_to_keep")) is None
+                else tuple(keep)
+            ),
+        ),
         extraction=ExtractionConfig(
             ai_extract_version=str(extraction["ai_extract_version"]),
             chunk_keyword_filter=tuple(extraction.get("chunk_keyword_filter", ())),

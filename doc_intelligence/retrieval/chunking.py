@@ -1,10 +1,54 @@
+from __future__ import annotations
+
+import re
+from typing import Sequence
+
 from doc_intelligence.config import DocumentTypeConfig
+
+# "Key: value" lines that ai_prep_search prepends to every chunk's embed text.
+_HEADER_LINE = re.compile(r"^[^\n:]{1,40}: [^\n]*$")
+_HEADER_BLOCK_SQL_REGEX = r"^((?:[^\\n:]{1,40}: [^\\n]*\\n)+)"
+
+
+def split_metadata_header(text: str | None) -> tuple[list[str], str]:
+    """Leading 'Key: value' lines vs. the rest of the chunk."""
+    lines = (text or "").split("\n")
+    count = 0
+    while count < len(lines) and _HEADER_LINE.match(lines[count]):
+        count += 1
+    if count == len(lines):  # header only, nothing after it: treat as body
+        return [], text or ""
+    return lines[:count], "\n".join(lines[count:])
+
+
+def clean_chunk_text(text: str | None, keep_keys: Sequence[str] | None) -> str:
+    """Python twin of build_clean_chunk_text_sql; keeps only the named header keys."""
+    if keep_keys is None:
+        return text or ""
+    header, body = split_metadata_header(text)
+    kept = [line for line in header if any(line.startswith(f"{key}: ") for key in keep_keys)]
+    return "\n".join([*kept, body]) if kept else body
+
+
+def build_clean_chunk_text_sql(column: str, keep_keys: Sequence[str] | None) -> str:
+    """Spark SQL expression producing the same result as clean_chunk_text."""
+    if keep_keys is None:
+        return column
+    header = f"regexp_extract({column}, '{_HEADER_BLOCK_SQL_REGEX}', 1)"
+    body = f"substring({column}, length({header}) + 1)"
+    if not keep_keys:
+        return body
+    alternation = "|".join(re.escape(key) for key in keep_keys)
+    # split() takes a regex ('\\n' -> \n pattern); the join separators must be a real newline ('\n')
+    kept = f"filter(split({header}, '\\\\n'), line -> line RLIKE '^({alternation}): ')"
+    return f"CASE WHEN size({kept}) > 0 THEN concat(array_join({kept}, '\\n'), '\\n', {body}) ELSE {body} END"
 
 
 def build_chunk_sql(cfg: DocumentTypeConfig) -> str:
     """SQL that explodes each parsed document into chunks via ai_prep_search and
     (re)creates the chunks table, with Change Data Feed enabled (required for a
-    Vector Search Delta Sync index)."""
+    Vector Search Delta Sync index). chunk_text is what gets embedded."""
+    embed_text = "chunk:chunk_to_embed::STRING"
     return f"""
         CREATE OR REPLACE TABLE {cfg.chunks_full_name}
         TBLPROPERTIES (delta.enableChangeDataFeed = true)
@@ -13,8 +57,9 @@ def build_chunk_sql(cfg: DocumentTypeConfig) -> str:
           md5(concat(plan_name, '_', cast(chunk:chunk_position AS STRING))) AS chunk_id,
           plan_name,
           file_name,
-          chunk:chunk_position::INT    AS chunk_index,
-          chunk:chunk_to_embed::STRING AS chunk_text,
+          chunk:chunk_position::INT AS chunk_index,
+          {build_clean_chunk_text_sql(embed_text, cfg.chunking.header_keys_to_keep)} AS chunk_text,
+          regexp_extract({embed_text}, '{_HEADER_BLOCK_SQL_REGEX}', 1) AS chunk_header,
           array_join(try_cast(chunk:pages AS ARRAY<STRING>), ',') AS pages
         FROM (
           SELECT

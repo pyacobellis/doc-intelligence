@@ -34,6 +34,13 @@ vector_search:
 parsing:
   ai_parse_version: "2.0"
 
+chunking:
+  # ai_prep_search prepends "Key: value" lines to every chunk (~14% of the text). Plan-level
+  # boilerplate (Act, Minister, Publication Date, Title, Page Header, ...) is dropped from
+  # the embedded text; keys describing the chunk's own content are kept. The full header
+  # is preserved in the chunk_header column.
+  header_keys_to_keep: [Sections, Section, Tables, Contains]
+
 extraction:
   ai_extract_version: "2.1"
   chunk_keyword_filter: [limit, flow, access, cease, threshold, extraction, environmental, compliance]

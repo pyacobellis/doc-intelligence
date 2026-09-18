@@ -10,6 +10,7 @@ def test_config_loads_nested_sections(wsp_config):
     assert wsp_config.chunks_index_full_name == "workspace.default.wsp_chunks_index"
     assert wsp_config.vector_search.query_type == "HYBRID"
     assert wsp_config.models.llm.startswith("databricks-")
+    assert wsp_config.chunking.header_keys_to_keep == ("Sections", "Section", "Tables", "Contains")
 
 
 def test_extraction_fields_and_taxonomy_come_from_config(wsp_config):
@@ -47,6 +48,7 @@ def test_defaults_apply_for_optional_keys():
     assert cfg.source.volume == "/Volumes/c/s/raw"
     assert cfg.vector_search.query_type == "ANN" and cfg.vector_search.num_results == 5
     assert cfg.ai_parse_version == "2.0"
+    assert cfg.chunking.header_keys_to_keep is None
     assert cfg.extraction.instructions == "do it"
     assert cfg.taxonomy.rule_type_names == ("only",)
     assert dict(cfg.taxonomy.unit_aliases) == {}
