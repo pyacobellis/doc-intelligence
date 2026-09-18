@@ -78,7 +78,8 @@ resources:
 
     wsp_check_source:
       name: "[${bundle.target}] doc-intel check source (wsp)"
-      # Enable once source.listing_url is set in configs/wsp.yaml.
+      # Records change proposals for review. Paused: Free Edition serverless compute has no
+      # outbound internet, so on this workspace `check-source` runs from a laptop instead.
       schedule:
         quartz_cron_expression: "0 0 6 ? * MON"
         timezone_id: Australia/Sydney
@@ -95,7 +96,7 @@ resources:
           python_wheel_task:
             package_name: doc_intelligence
             entry_point: doc-intel
-            parameters: ["--config", "${workspace.file_path}/${var.config_path}", "check-source", "--apply"]
+            parameters: ["--config", "${workspace.file_path}/${var.config_path}", "check-source"]
 
   apps:
     wsp_app:

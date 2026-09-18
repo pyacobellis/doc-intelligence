@@ -11,9 +11,8 @@ def build_parse_sql(cfg: DocumentTypeConfig) -> str:
           regexp_replace(_metadata.file_name, '\\\\.pdf$', '')  AS plan_name,
           content,
           ai_parse_document(content, MAP('version', '{cfg.ai_parse_version}')) AS parsed_content
-        FROM READ_FILES('{cfg.source.volume}/', format => 'binaryFile')
-        WHERE path LIKE '%.pdf'
-          AND _metadata.file_name LIKE '{cfg.source.file_pattern}'
+        FROM READ_FILES('{cfg.source.volume}/*.pdf', format => 'binaryFile')
+        WHERE _metadata.file_name LIKE '{cfg.source.file_pattern}'
     """
 
 

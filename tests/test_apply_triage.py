@@ -79,6 +79,14 @@ def test_canonical_file_name_uses_pattern_prefix(wsp_config):
     assert canonical_file_name(wsp_config, "lachlan_unregulated_2025") == "WSP_lachlan_unregulated_2025.pdf"
 
 
+def test_safe_name_adds_extension_and_cleans_encoding():
+    from doc_intelligence.monitoring.apply import _safe_name
+
+    assert _safe_name("https://publications.water.nsw.gov.au/watergroupjspui/bitstream/100/4331/1/39221") == "39221.pdf"
+    assert _safe_name("https://x/files/Changes%20to%20the%20Plan%20%28Feb%29.pdf") == "Changes-to-the-Plan-_28Feb_29.pdf"
+    assert _safe_name("https://x/a/b/rules.pdf?download=1") == "rules.pdf"
+
+
 def test_wait_for_download_ignores_old_and_in_progress_files(tmp_path):
     old = tmp_path / "old.pdf"
     old.write_bytes(b"%PDF-old")

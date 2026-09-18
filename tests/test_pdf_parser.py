@@ -7,7 +7,7 @@ def test_build_parse_sql_targets_configured_table_and_volume(wsp_config):
     sql = build_parse_sql(wsp_config)
 
     assert "workspace.default.wsp_parsed_docs" in sql
-    assert "/Volumes/workspace/default/raw/" in sql
+    assert "READ_FILES('/Volumes/workspace/default/raw/*.pdf'" in sql  # top level only: supporting/ and archive/ are not plans
     assert "ai_parse_document" in sql
     assert "LIKE 'WSP_%'" in sql
 

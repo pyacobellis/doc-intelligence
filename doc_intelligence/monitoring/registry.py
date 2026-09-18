@@ -315,6 +315,29 @@ def set_proposal_status(spark, cfg: DocumentTypeConfig, proposal_id: str, status
     spark.sql(f"UPDATE {cfg.proposals_full_name} SET {', '.join(sets)} WHERE proposal_id = '{sql_literal(proposal_id)}'")
 
 
+def supporting_links_for(
+    run_sql: SqlRunner, cfg: DocumentTypeConfig, plan_key: str, kinds: Sequence[str] | None = None
+) -> list[dict]:
+    """Supporting-document links most recently observed for one document, optionally
+    limited to kinds (e.g. rule_summary, changes_fact_sheet)."""
+    if not table_exists(run_sql, cfg, cfg.tables.observations):
+        return []
+    frame = run_sql(
+        f"SELECT kind, text, url FROM {cfg.observations_full_name} "
+        f"WHERE plan_key = '{sql_literal(plan_key)}' AND kind LIKE 'supporting:%' "
+        f"AND observed_at = (SELECT max(observed_at) FROM {cfg.observations_full_name} "
+        f"WHERE plan_key = '{sql_literal(plan_key)}')"
+    )
+    wanted = {f"supporting:{k}" for k in kinds} if kinds else None
+    links, seen = [], set()
+    for r in frame.itertuples(index=False):
+        if r.url in seen or (wanted and r.kind not in wanted):
+            continue
+        seen.add(r.url)
+        links.append({"kind": str(r.kind), "text": str(r.text), "url": str(r.url)})
+    return links
+
+
 def touch_registry(entries: Mapping[str, RegistryEntry], snapshot: SourceSnapshot) -> list[RegistryEntry]:
     """Update last_seen for listings still present; entries are returned for rewrite."""
     listed = {listing.plan_key for listing in snapshot.plans}

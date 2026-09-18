@@ -151,6 +151,30 @@ def test_explicit_spark_schemas_match_column_lists():
     assert {f.name: f.dataType.simpleString() for f in registry_spark_schema().fields}["confirmed"] == "boolean"
 
 
+def test_supporting_links_for_filters_kinds_and_dedupes(wsp_config):
+    from doc_intelligence.monitoring.registry import supporting_links_for
+
+    observed = pd.DataFrame(
+        {
+            "kind": ["supporting:rule_summary", "supporting:map", "supporting:rule_summary", "instrument"],
+            "text": ["Rule summary sheets", "Plan map", "Rule summary sheets", "Read: x"],
+            "url": ["https://x/rules.pdf", "https://x/map.pdf", "https://x/rules.pdf", "https://leg/x"],
+        }
+    )
+
+    def run_sql(sql):
+        if sql.startswith("SHOW TABLES"):
+            return pd.DataFrame({"tableName": ["wsp_source_observations"]})
+        assert "plan_key = 'k'" in sql and "max(observed_at)" in sql
+        return observed
+
+    links = supporting_links_for(run_sql, wsp_config, "k")
+    assert [l["url"] for l in links] == ["https://x/rules.pdf", "https://x/map.pdf", "https://leg/x"]
+    only = supporting_links_for(run_sql, wsp_config, "k", kinds=["rule_summary"])
+    assert [l["kind"] for l in only] == ["supporting:rule_summary"]
+    assert supporting_links_for(lambda sql: pd.DataFrame(), wsp_config, "k") == []
+
+
 def test_load_registry_round_trips_frame_values(snapshot, wsp_config):
     entries = seed_registry(snapshot, wsp_config)
     frame = registry_frame(entries)

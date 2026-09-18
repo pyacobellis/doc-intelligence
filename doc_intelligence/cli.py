@@ -216,6 +216,22 @@ def cmd_registry(args, cfg):
               f"({confirmed} confirmed/ingested, {len(entries) - confirmed} known but not ingested)")
         return
     entries = reg.load_registry(runner, cfg)
+    if args.registry_command == "fetch-supporting":
+        from doc_intelligence.monitoring.apply import apply_supporting
+
+        kinds = [k.strip() for k in args.kinds.split(",")] if args.kinds else None
+        links = reg.supporting_links_for(runner, cfg, args.plan_key, kinds)
+        if not links:
+            raise SystemExit(f"no supporting links observed for {args.plan_key!r} (run `registry seed` or `check-source` first)")
+        entry = entries.get(args.plan_key)
+        proposal = reg.Proposal("manual", f"manual:{args.plan_key}", reg._now(), "supporting_doc", args.plan_key,
+                                entry.display_name if entry else args.plan_key, 1.0, {"new_supporting": links},
+                                "fetch_supporting")
+        result = apply_supporting(_client(args), cfg, proposal)
+        for path in result.uploaded:
+            print(f"  {path}")
+        print(result.note)
+        return
     if args.registry_command == "confirm":
         entry = entries.get(args.plan_key)
         if entry is None:
@@ -414,6 +430,9 @@ def build_parser() -> argparse.ArgumentParser:
     q = rs.add_parser("confirm", help="mark an entry confirmed, optionally naming its file in the volume")
     q.add_argument("plan_key")
     q.add_argument("--plan-name", default=None)
+    q = rs.add_parser("fetch-supporting", help="fetch a document's supporting PDFs into <volume>/supporting/<plan_key>/")
+    q.add_argument("plan_key")
+    q.add_argument("--kinds", default=None, help="comma-separated kinds, e.g. rule_summary,changes_fact_sheet")
     p.set_defaults(run=cmd_registry)
 
     p = sub.add_parser("check-source", help="scan the site for new/changed documents and record proposals")

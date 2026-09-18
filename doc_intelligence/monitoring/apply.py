@@ -34,8 +34,9 @@ def canonical_file_name(cfg: DocumentTypeConfig, plan_key: str) -> str:
 
 
 def _safe_name(url: str) -> str:
-    name = url.rstrip("/").rsplit("/", 1)[-1].split("?")[0] or "document.pdf"
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+    name = re.sub(r"%20", "-", url.rstrip("/").rsplit("/", 1)[-1].split("?")[0]) or "document.pdf"
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+    return name if "." in name else f"{name}.pdf"  # repository links often carry an id, not a file name
 
 
 def apply_supporting(w, cfg: DocumentTypeConfig, proposal: Proposal, session=None) -> ApplyResult:
