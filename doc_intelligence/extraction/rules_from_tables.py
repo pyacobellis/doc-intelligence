@@ -9,6 +9,7 @@ import pandas as pd
 from doc_intelligence.config import DocumentTypeConfig
 from doc_intelligence.extraction.schema import rule_columns
 from doc_intelligence.extraction.taxonomy import Taxonomy
+from doc_intelligence.parsing.elements import build_elements_sql
 
 # A number followed by ". " is a list marker ("1. More than ..."), and a number preceded
 # by "(" is a reference code such as a gauge id ("(416001)"); neither is a value.
@@ -16,34 +17,11 @@ _NUMBER = r"(?<![(\w])(?P<value>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?![.
 
 
 def build_table_elements_sql(cfg: DocumentTypeConfig) -> str:
-    """Table elements from the parsed documents, each tagged with the most recent
-    section header so extracted rules carry a section reference. Pure SQL, no AI calls."""
+    """Table elements in document order with their section reference. Pure SQL, no AI calls."""
+    inner = build_elements_sql(cfg, ("table",), ordered=False)
     return f"""
-        WITH elements AS (
-          SELECT
-            plan_name,
-            element:id::BIGINT                        AS element_id,
-            element:type::STRING                      AS element_type,
-            element:content::STRING                   AS content,
-            try_cast(element:bbox[0].page_id AS INT)  AS page_id,
-            try_cast(element:confidence AS DOUBLE)    AS parse_confidence
-          FROM {cfg.parsed_docs_full_name}
-          LATERAL VIEW explode(try_cast(parsed_content:document:elements AS ARRAY<VARIANT>)) AS element
-          WHERE is_variant_null(parsed_content:error_status)
-        ),
-        with_section AS (
-          SELECT *,
-            last_value(
-              CASE WHEN element_type = 'section_header'
-                   THEN trim(regexp_replace(content, '\\\\.{{3,}}.*$', '')) END,
-              true
-            ) OVER (PARTITION BY plan_name ORDER BY element_id
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS section_reference
-          FROM elements
-        )
         SELECT plan_name, element_id, page_id, parse_confidence, section_reference, content AS table_html
-        FROM with_section
-        WHERE element_type = 'table'
+        FROM ({inner})
         ORDER BY plan_name, element_id
     """
 

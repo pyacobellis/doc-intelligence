@@ -45,6 +45,30 @@ def test_retrieval_metrics():
     assert plan_recall(HITS, []) is None and reciprocal_rank(HITS, []) is None and hit_at_k(HITS, [], 3) is None
 
 
+def test_snippet_metrics_match_case_and_whitespace_insensitively():
+    from doc_intelligence.eval.metrics import snippet_hit_at_k, snippet_rank
+
+    assert snippet_rank(HITS, "A TEXT") == 2
+    assert snippet_rank(HITS, "more   b") == 3
+    assert snippet_rank(HITS, "absent") == 0
+    assert snippet_rank(HITS, None) is None
+    assert snippet_hit_at_k(HITS, "a text", 1) is False
+    assert snippet_hit_at_k(HITS, "a text", 2) is True
+    assert snippet_hit_at_k(HITS, None, 5) is None
+
+
+def test_variant_runs_are_labelled_in_the_summary():
+    questions = [EvalQuestion("q1", "one", "factual", expected_plans=("WSP_A",), expected_snippet="a text")]
+    base = evaluate_retrieval(questions, lambda q: HITS, "vs", k=2)
+    variant = evaluate_retrieval(questions, lambda q: HITS[1:], "vs", k=2, variant="section_400", index_name="ix")
+    frame = results_frame(base + variant)
+    assert frame.loc[0, "snippet_rank"] == 2 and frame.loc[1, "snippet_rank"] == 1
+    assert frame.loc[1, "index_name"] == "ix"
+    summary = summarise_results(frame)
+    assert set(summary.retriever) == {"vs@base", "vs@section_400"}
+    assert "snippet_hit_at_k" in summary.columns
+
+
 def test_judge_sql_and_response_parsing(wsp_config):
     sql = build_judge_sql(wsp_config, "Q?", "ref", "cand's")
     assert "Reference answer: ref" in sql and "cand''s" in sql

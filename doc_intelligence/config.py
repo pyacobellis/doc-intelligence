@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
@@ -41,11 +41,33 @@ class VectorSearchConfig:
     rrf_k: int
 
 
+CHUNKING_STRATEGIES = ("ai_prep_search", "section", "fixed")
+
+
 @dataclass(frozen=True)
 class ChunkingConfig:
+    strategy: str = "ai_prep_search"
     # None = leave ai_prep_search's "Key: value" header untouched; () = drop it entirely;
     # otherwise keep only these keys in the embedded text (full header kept in chunk_header)
     header_keys_to_keep: tuple[str, ...] | None = None
+    # section / fixed strategies: target chunk size in characters (~4 chars per token)
+    max_chars: int = 1600
+    # fixed strategy only: characters shared between consecutive windows
+    overlap_chars: int = 200
+    # named alternative settings for A/B runs; each variant gets its own chunk table + index
+    variants: Mapping[str, Mapping] = MappingProxyType({})
+
+    def with_overrides(self, overrides: Mapping) -> "ChunkingConfig":
+        allowed = {"strategy", "header_keys_to_keep", "max_chars", "overlap_chars"}
+        unknown = set(overrides) - allowed
+        if unknown:
+            raise ValueError(f"unknown chunking keys: {sorted(unknown)}")
+        values = {k: overrides[k] for k in allowed if k in overrides}
+        if "header_keys_to_keep" in values and values["header_keys_to_keep"] is not None:
+            values["header_keys_to_keep"] = tuple(values["header_keys_to_keep"])
+        if "strategy" in values and values["strategy"] not in CHUNKING_STRATEGIES:
+            raise ValueError(f"chunking.strategy must be one of {CHUNKING_STRATEGIES}")
+        return replace(self, **values)
 
 
 @dataclass(frozen=True)
@@ -179,13 +201,7 @@ def config_from_dict(raw: dict) -> DocumentTypeConfig:
             rrf_k=int(vs.get("rrf_k", 60)),
         ),
         ai_parse_version=str(raw.get("parsing", {}).get("ai_parse_version", "2.0")),
-        chunking=ChunkingConfig(
-            header_keys_to_keep=(
-                None
-                if (keep := (raw.get("chunking") or {}).get("header_keys_to_keep")) is None
-                else tuple(keep)
-            ),
-        ),
+        chunking=_chunking_from_dict(raw.get("chunking") or {}),
         extraction=ExtractionConfig(
             ai_extract_version=str(extraction["ai_extract_version"]),
             chunk_keyword_filter=tuple(extraction.get("chunk_keyword_filter", ())),
@@ -211,4 +227,28 @@ def config_from_dict(raw: dict) -> DocumentTypeConfig:
             questions_file=raw["eval"]["questions_file"],
             judge_prompt=raw["eval"]["judge_prompt"].strip(),
         ),
+    )
+
+
+def _chunking_from_dict(raw: Mapping) -> ChunkingConfig:
+    base = ChunkingConfig().with_overrides({k: v for k, v in raw.items() if k != "variants"})
+    variants = MappingProxyType({name: dict(spec or {}) for name, spec in (raw.get("variants") or {}).items()})
+    for name, spec in variants.items():
+        base.with_overrides(spec)  # fail fast on a bad variant
+    return replace(base, variants=variants)
+
+
+def with_chunk_variant(cfg: DocumentTypeConfig, variant: str | None) -> DocumentTypeConfig:
+    """A copy of the config pointing at the variant's own chunk table and index, so
+    alternative chunkings coexist and can be evaluated side by side."""
+    if not variant:
+        return cfg
+    if variant not in cfg.chunking.variants:
+        raise ValueError(f"unknown chunking variant {variant!r}; configured: {sorted(cfg.chunking.variants)}")
+    suffix = f"__{variant}"
+    return replace(
+        cfg,
+        chunking=cfg.chunking.with_overrides(cfg.chunking.variants[variant]),
+        tables=replace(cfg.tables, chunks=cfg.tables.chunks + suffix),
+        vector_search=replace(cfg.vector_search, index_name=cfg.vector_search.index_name + suffix),
     )

@@ -1,4 +1,28 @@
-from doc_intelligence.config import config_from_dict
+import pytest
+
+from doc_intelligence.config import ChunkingConfig, config_from_dict, with_chunk_variant
+
+
+def test_chunk_variants_get_their_own_table_and_index(wsp_config):
+    assert wsp_config.chunking.strategy == "ai_prep_search"
+    assert "section_400" in wsp_config.chunking.variants
+    variant = with_chunk_variant(wsp_config, "section_400")
+    assert variant.chunking.strategy == "section" and variant.chunking.max_chars == 1600
+    assert variant.chunking.header_keys_to_keep == wsp_config.chunking.header_keys_to_keep
+    assert variant.chunks_full_name == "workspace.default.wsp_chunks__section_400"
+    assert variant.chunks_index_full_name == "workspace.default.wsp_chunks_index__section_400"
+    assert variant.rules_full_name == wsp_config.rules_full_name
+    assert with_chunk_variant(wsp_config, None) is wsp_config
+    with pytest.raises(ValueError):
+        with_chunk_variant(wsp_config, "nope")
+
+
+def test_chunking_overrides_are_validated():
+    with pytest.raises(ValueError):
+        ChunkingConfig().with_overrides({"strategy": "magic"})
+    with pytest.raises(ValueError):
+        ChunkingConfig().with_overrides({"max_tokens": 5})
+    assert ChunkingConfig().with_overrides({"header_keys_to_keep": ["A"]}).header_keys_to_keep == ("A",)
 
 
 def test_config_loads_nested_sections(wsp_config):

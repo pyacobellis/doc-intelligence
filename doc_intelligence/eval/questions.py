@@ -16,6 +16,8 @@ class EvalQuestion:
     expected_answer: str | None = None
     expected_plans: tuple[str, ...] = ()
     expected_rule_type: str | None = None
+    # chunk-level ground truth: a phrase that must appear in a retrieved chunk (case-insensitive)
+    expected_snippet: str | None = None
     notes: str | None = None
     status: str = "draft"
 
@@ -37,8 +39,9 @@ def load_eval_questions(path: str | Path) -> list[EvalQuestion]:
                 question=str(item["question"]).strip(),
                 category=category,
                 expected_answer=(str(item["expected_answer"]).strip() or None) if item.get("expected_answer") else None,
-                expected_plans=tuple(item.get("expected_plans") or ()),
+                expected_plans=tuple(item.get("expected_plans") or item.get("expected_documents") or ()),
                 expected_rule_type=item.get("expected_rule_type"),
+                expected_snippet=(str(item["expected_snippet"]).strip() or None) if item.get("expected_snippet") else None,
                 notes=item.get("notes"),
                 status=str(item.get("status", "draft")),
             )

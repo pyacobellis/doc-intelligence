@@ -44,6 +44,24 @@ def hit_at_k(hits: Sequence[SearchHit], expected_plans: Sequence[str], k: int) -
     return any(hit.plan_name in expected for hit in hits[:k])
 
 
+def snippet_rank(hits: Sequence[SearchHit], expected_snippet: str | None) -> int | None:
+    """1-based rank of the first chunk containing the expected phrase; 0 if none; None if no phrase."""
+    if not expected_snippet:
+        return None
+    needle = " ".join(expected_snippet.lower().split())
+    for rank, hit in enumerate(hits, start=1):
+        if needle in " ".join(hit.chunk_text.lower().split()):
+            return rank
+    return 0
+
+
+def snippet_hit_at_k(hits: Sequence[SearchHit], expected_snippet: str | None, k: int) -> bool | None:
+    rank = snippet_rank(hits, expected_snippet)
+    if rank is None:
+        return None
+    return 0 < rank <= k
+
+
 def build_judge_prompt(cfg: DocumentTypeConfig, question: str, reference_answer: str, candidate_answer: str) -> str:
     return (
         f"{cfg.eval.judge_prompt}\n\nQuestion: {question}\n\n"

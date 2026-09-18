@@ -58,7 +58,10 @@ questions:
     question: What is 198 ML/day a threshold for?
     expected_plans: [WSP_Barwon-Darling_Unregulated_2026]
     expected_rule_type: flow_class_threshold
+    # chunk-level ground truth: this phrase (from TABLE A) must be inside a retrieved chunk
+    expected_snippet: 198 ML/day at Mungindi gauge
     notes: >-
       Exact numeric term. Tests whether keyword/hybrid retrieval beats pure semantic
-      similarity on a query dominated by a number.
+      similarity on a query dominated by a number, and whether the chunking keeps the
+      table row inside the embedded window.
     status: draft

@@ -106,6 +106,8 @@ def cmd_status(args, cfg):
     from doc_intelligence.retrieval.chunking import build_chunk_summary_sql
 
     spark = _spark(args)
+    print(f"config: {cfg.document_type} | chunking: {cfg.chunking.strategy}"
+          f"{f' (variant {args.variant})' if args.variant else ''} -> {cfg.chunks_full_name}")
     for title, sql in (
         ("parsed documents", build_parse_status_sql(cfg)),
         ("chunks", build_chunk_summary_sql(cfg)),
@@ -178,10 +180,13 @@ def cmd_eval(args, cfg):
 
     questions = load_eval_questions(_resolve(cfg.eval.questions_file, args.config))
     retriever = _retriever(args, cfg)
+    run_meta = dict(variant=args.variant, index_name=cfg.chunks_index_full_name)
     if args.answers:
-        results = evaluate_answers(_runner(args), _client(args), cfg, questions, retriever, args.retriever, args.k)
+        results = evaluate_answers(
+            _runner(args), _client(args), cfg, questions, retriever, args.retriever, args.k, **run_meta
+        )
     else:
-        results = evaluate_retrieval(questions, retriever, args.retriever, args.k)
+        results = evaluate_retrieval(questions, retriever, args.retriever, args.k, **run_meta)
     frame = results_frame(results)
     _show(summarise_results(frame))
     if args.verbose:
@@ -220,6 +225,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile",
         default=os.environ.get("DATABRICKS_CONFIG_PROFILE"),
         help="Databricks CLI profile for local runs (omit inside a Databricks job)",
+    )
+    parser.add_argument(
+        "--variant",
+        default=None,
+        help="chunking variant from the config (uses its own chunk table and index), e.g. section_400",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -273,8 +283,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from doc_intelligence.config import with_chunk_variant
+
     args = build_parser().parse_args(argv)
-    cfg = load_document_type_config(args.config)
+    cfg = with_chunk_variant(load_document_type_config(args.config), args.variant)
     args.run(args, cfg)
     return 0
 

@@ -56,6 +56,7 @@ def test_build_chunk_sql_reads_parsed_docs_and_writes_chunks(wsp_config):
     assert "delta.enableChangeDataFeed = true" in sql
     assert "AS chunk_header" in sql and "AS pages" in sql
     assert "p -> p:page_id::STRING" in sql
+    assert "CAST(NULL AS STRING) AS section_reference" in sql and "'ai_prep_search' AS strategy" in sql
     assert "RLIKE '^(Sections|Section|Tables|Contains): '" in sql
 
 

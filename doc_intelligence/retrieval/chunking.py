@@ -45,9 +45,9 @@ def build_clean_chunk_text_sql(column: str, keep_keys: Sequence[str] | None) -> 
 
 
 def build_chunk_sql(cfg: DocumentTypeConfig) -> str:
-    """SQL that explodes each parsed document into chunks via ai_prep_search and
-    (re)creates the chunks table, with Change Data Feed enabled (required for a
-    Vector Search Delta Sync index). chunk_text is what gets embedded."""
+    """ai_prep_search strategy: explode each parsed document into chunks in SQL and
+    (re)create the chunks table with Change Data Feed enabled (required for a Vector
+    Search Delta Sync index). chunk_text is what gets embedded."""
     embed_text = "chunk:chunk_to_embed::STRING"
     return f"""
         CREATE OR REPLACE TABLE {cfg.chunks_full_name}
@@ -60,7 +60,9 @@ def build_chunk_sql(cfg: DocumentTypeConfig) -> str:
           chunk:chunk_position::INT AS chunk_index,
           {build_clean_chunk_text_sql(embed_text, cfg.chunking.header_keys_to_keep)} AS chunk_text,
           regexp_extract({embed_text}, '{_HEADER_BLOCK_SQL_REGEX}', 1) AS chunk_header,
-          array_join(transform(try_cast(chunk:pages AS ARRAY<VARIANT>), p -> p:page_id::STRING), ',') AS pages
+          array_join(transform(try_cast(chunk:pages AS ARRAY<VARIANT>), p -> p:page_id::STRING), ',') AS pages,
+          CAST(NULL AS STRING) AS section_reference,
+          'ai_prep_search' AS strategy
         FROM (
           SELECT
             plan_name,
@@ -74,7 +76,12 @@ def build_chunk_sql(cfg: DocumentTypeConfig) -> str:
 
 def build_chunk_summary_sql(cfg: DocumentTypeConfig) -> str:
     return f"""
-        SELECT plan_name, count(*) AS chunk_count, round(avg(length(chunk_text))) AS avg_chunk_len
+        SELECT
+          plan_name,
+          any_value(strategy) AS strategy,
+          count(*) AS chunk_count,
+          round(avg(length(chunk_text))) AS avg_chunk_len,
+          max(length(chunk_text)) AS max_chunk_len
         FROM {cfg.chunks_full_name}
         GROUP BY plan_name
         ORDER BY plan_name
@@ -89,9 +96,27 @@ def build_vector_search_prereqs_sql(cfg: DocumentTypeConfig) -> list[str]:
     ]
 
 
+def write_chunks(spark, cfg: DocumentTypeConfig, chunks) -> None:
+    """Overwrite the chunks table from Python-built chunks (section/fixed strategies)."""
+    from doc_intelligence.retrieval.chunkers import chunks_frame, chunks_spark_schema
+
+    df = spark.createDataFrame(chunks_frame(chunks), schema=chunks_spark_schema())
+    df.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(cfg.chunks_full_name)
+    spark.sql(f"ALTER TABLE {cfg.chunks_full_name} SET TBLPROPERTIES (delta.enableChangeDataFeed = true)")
+
+
 def chunk_documents(spark, cfg: DocumentTypeConfig):
-    """Run the chunking step (calls ai_prep_search; costs DBU) and return the per-plan summary."""
-    spark.sql(build_chunk_sql(cfg))
+    """Run the configured chunking strategy and return the per-plan summary.
+    ai_prep_search calls an AI function (costs DBU); section/fixed are pure Python over
+    the already-parsed elements. Either way the table is recreated, which breaks the
+    Delta Sync index until `build_index` repairs it."""
+    if cfg.chunking.strategy == "ai_prep_search":
+        spark.sql(build_chunk_sql(cfg))
+    else:
+        from doc_intelligence.parsing.elements import load_elements
+        from doc_intelligence.retrieval.chunkers import chunk_elements
+
+        write_chunks(spark, cfg, chunk_elements(load_elements(spark, cfg), cfg.chunking))
     for statement in build_vector_search_prereqs_sql(cfg):
         spark.sql(statement)
     return spark.sql(build_chunk_summary_sql(cfg))

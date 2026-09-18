@@ -35,11 +35,29 @@ parsing:
   ai_parse_version: "2.0"
 
 chunking:
+  # ai_prep_search (Databricks-native, ~1,000-token chunks) | section (parsed elements grouped
+  # under their section header, split at max_chars) | fixed (sliding character windows)
+  strategy: ai_prep_search
   # ai_prep_search prepends "Key: value" lines to every chunk (~14% of the text). Plan-level
   # boilerplate (Act, Minister, Publication Date, Title, Page Header, ...) is dropped from
   # the embedded text; keys describing the chunk's own content are kept. The full header
   # is preserved in the chunk_header column.
   header_keys_to_keep: [Sections, Section, Tables, Contains]
+  max_chars: 1600      # ~400 tokens: fits comfortably inside the embedding model's 512-token window
+  overlap_chars: 200
+  # A/B variants: `doc-intel --variant section_400 chunk` builds wsp_chunks__section_400 and
+  # wsp_chunks_index__section_400; `--variant section_400 eval` scores retrieval against it.
+  variants:
+    section_400:
+      strategy: section
+      max_chars: 1600
+    section_800:
+      strategy: section
+      max_chars: 3200
+    fixed_400:
+      strategy: fixed
+      max_chars: 1600
+      overlap_chars: 200
 
 extraction:
   ai_extract_version: "2.1"
