@@ -17,6 +17,16 @@ def build_rules_table(spark, cfg: DocumentTypeConfig):
     return spark.sql(build_rules_summary_sql(cfg))
 
 
+def refresh_table_rules(spark, cfg: DocumentTypeConfig):
+    """Replace only the deterministic (table) rules, leaving LLM-extracted rows untouched.
+    No AI calls, so the deterministic path can be iterated cheaply."""
+    columns = rule_columns(cfg)
+    table_rules = spark.createDataFrame(extract_table_rules(spark, cfg), schema=rules_spark_schema(cfg))
+    spark.sql(f"DELETE FROM {cfg.rules_full_name} WHERE extraction_source = 'table'")
+    table_rules.select(*columns).write.mode("append").saveAsTable(cfg.rules_full_name)
+    return spark.sql(build_rules_summary_sql(cfg))
+
+
 def _numeric_value_expr(cfg: DocumentTypeConfig) -> str:
     if "value" in cfg.extraction.field_names:
         return "count(CASE WHEN value IS NOT NULL THEN 1 END)"

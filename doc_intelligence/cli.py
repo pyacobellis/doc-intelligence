@@ -87,6 +87,12 @@ def cmd_extract_rules(args, cfg):
     _show(build_rules_table(_spark(args), cfg))
 
 
+def cmd_refresh_table_rules(args, cfg):
+    from doc_intelligence.extraction import refresh_table_rules
+
+    _show(refresh_table_rules(_spark(args), cfg))
+
+
 def cmd_pipeline(args, cfg):
     for step in (cmd_parse, cmd_chunk, cmd_index, cmd_extract_rules):
         print(f"== {step.__name__.removeprefix('cmd_')} ==")
@@ -221,6 +227,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("chunk", help="ai_prep_search chunking" + COSTLY).set_defaults(run=cmd_chunk)
     sub.add_parser("index", help="ensure the Vector Search endpoint/index and sync").set_defaults(run=cmd_index)
     sub.add_parser("extract-rules", help="rebuild the rules table" + COSTLY).set_defaults(run=cmd_extract_rules)
+    sub.add_parser(
+        "refresh-table-rules", help="re-run only the deterministic table extraction (no AI calls)"
+    ).set_defaults(run=cmd_refresh_table_rules)
     sub.add_parser("pipeline", help="parse, chunk, index, extract-rules" + COSTLY).set_defaults(run=cmd_pipeline)
     sub.add_parser("status", help="read-only health check of every stage").set_defaults(run=cmd_status)
 

@@ -60,7 +60,7 @@ def build_chunk_sql(cfg: DocumentTypeConfig) -> str:
           chunk:chunk_position::INT AS chunk_index,
           {build_clean_chunk_text_sql(embed_text, cfg.chunking.header_keys_to_keep)} AS chunk_text,
           regexp_extract({embed_text}, '{_HEADER_BLOCK_SQL_REGEX}', 1) AS chunk_header,
-          array_join(try_cast(chunk:pages AS ARRAY<STRING>), ',') AS pages
+          array_join(transform(try_cast(chunk:pages AS ARRAY<VARIANT>), p -> p:page_id::STRING), ',') AS pages
         FROM (
           SELECT
             plan_name,

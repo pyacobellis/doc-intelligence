@@ -55,6 +55,7 @@ def test_build_chunk_sql_reads_parsed_docs_and_writes_chunks(wsp_config):
     assert "ai_prep_search" in sql
     assert "delta.enableChangeDataFeed = true" in sql
     assert "AS chunk_header" in sql and "AS pages" in sql
+    assert "p -> p:page_id::STRING" in sql
     assert "RLIKE '^(Sections|Section|Tables|Contains): '" in sql
 
 
@@ -91,5 +92,6 @@ def test_clean_chunk_text_sql_matches_python_on_real_chunks(spark, wsp_config):
     assert len(df) == 12
     for original, cleaned in zip(df.chunk_text, df.cleaned):
         assert cleaned == clean_chunk_text(original, keep)
-        assert not cleaned.startswith("Act: ")
-    assert df.cleaned.str.len().sum() < 0.95 * df.chunk_text.str.len().sum()
+        assert not cleaned.startswith(("Act: ", "Title: ", "Date: ", "Minister: "))
+    # idempotent: once the table has been rebuilt with stripping, re-applying changes nothing
+    assert df.cleaned.str.len().sum() <= df.chunk_text.str.len().sum()

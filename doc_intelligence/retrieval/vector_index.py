@@ -76,9 +76,41 @@ def index_status(w, cfg: DocumentTypeConfig) -> dict:
     }
 
 
+def sync_failed(w, cfg: DocumentTypeConfig) -> bool:
+    """True when the Delta Sync pipeline's latest update failed — typically because the
+    source table was recreated (CREATE OR REPLACE) and the pipeline can no longer resolve it."""
+    idx = w.vector_search_indexes.get_index(index_name=cfg.chunks_index_full_name)
+    spec = idx.delta_sync_index_spec
+    if not spec or not spec.pipeline_id:
+        return False
+    updates = w.pipelines.get(spec.pipeline_id).latest_updates or []
+    return bool(updates) and str(updates[0].state).endswith("FAILED")
+
+
+def recreate_index(w, cfg: DocumentTypeConfig, wait_seconds: int = 1800) -> str:
+    """Drop and rebuild the index. Needed after the chunks table is recreated."""
+    index_name = cfg.chunks_index_full_name
+    try:
+        w.vector_search_indexes.delete_index(index_name=index_name)
+    except NotFound:
+        pass
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        try:
+            w.vector_search_indexes.get_index(index_name=index_name)
+            time.sleep(5)
+        except NotFound:
+            break
+    return ensure_index(w, cfg, wait_seconds)
+
+
 def build_index(w, cfg: DocumentTypeConfig) -> dict:
-    """Idempotent: create endpoint + index if missing, then trigger a sync."""
+    """Idempotent: create endpoint + index if missing, rebuild it if its sync pipeline is
+    broken, then trigger a sync."""
     ensure_endpoint(w, cfg)
     ensure_index(w, cfg)
-    sync_index(w, cfg)
+    if sync_failed(w, cfg):
+        recreate_index(w, cfg)
+    else:
+        sync_index(w, cfg)
     return index_status(w, cfg)

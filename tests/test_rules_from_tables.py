@@ -3,7 +3,9 @@ import pytest
 from doc_intelligence.extraction.rules_from_tables import (
     build_table_elements_sql,
     extract_table_rules,
+    parse_table,
     parse_table_html,
+    resolve_table_header,
     rules_from_table,
 )
 from doc_intelligence.extraction.schema import rule_columns
@@ -94,6 +96,65 @@ def test_rules_from_table_forward_fills_spanning_cells_and_maps_hinted_columns(w
     assert rules[1]["condition"] == "A Class | 1. More than 198 ML/day at Mungindi gauge, and"
     assert rules[2]["condition"] == "A Class | 2. Less than or equal to 1,500 ML/day at Presbury gauge"
     assert all(r["unit"] == "ML/day" for r in rules)
+
+
+CONTINUATION_TABLE = """<table><tbody>
+<tr><td>Boomi Zone</td><td>A Class</td><td>1. More than 645 ML/day at Warraweena gauge (422035), and</td></tr>
+<tr><td></td><td>B Class</td><td>More than 2,000 ML/day at Warraweena gauge (422035)</td></tr>
+</tbody></table>"""
+
+
+def test_parse_table_flags_explicit_headers():
+    assert parse_table(ROWSPAN_TABLE)[1] is True          # <thead>
+    assert parse_table("<table><tr><th>a</th></tr><tr><td>1</td></tr></table>")[1] is True  # <th>
+    assert parse_table(FLOW_TABLE)[1] is False            # plain <td> rows
+    assert parse_table(None) == ([], False)
+
+
+def test_resolve_table_header_inherits_for_headerless_continuations(wsp_config, taxonomy):
+    rows, explicit = parse_table(CONTINUATION_TABLE)
+    inherited = ["Column 1 Management Zone", "Column 2 Flow class", "Column 3 Flow class thresholds (ML/day)"]
+    header, data = resolve_table_header(rows, explicit, inherited, taxonomy)
+    assert header == inherited and len(data) == 2
+    # a real header row is not mistaken for data, even when a previous header exists
+    header, data = resolve_table_header(parse_table_html(FLOW_TABLE), False, inherited, taxonomy)
+    assert header[0] == "Flow class" and len(data) == 2
+    assert resolve_table_header([], False, inherited, taxonomy) == ([], [])
+
+
+def test_continuation_page_uses_inherited_header_and_ignores_gauge_ids(wsp_config, taxonomy):
+    # without inheritance the first data row is swallowed as the header and the rest is misclassified
+    without_header = _rules(CONTINUATION_TABLE, wsp_config, taxonomy, section_reference="TABLE A")
+    assert [r["value"] for r in without_header] == [2000.0]
+    assert without_header[0]["rule_type"] == "other"
+
+    inherited = ["Column 1 Management Zone", "Column 2 Flow class", "Column 3 Flow class thresholds (ML/day)"]
+    rules = _rules(CONTINUATION_TABLE, wsp_config, taxonomy, section_reference="TABLE A",
+                   inherited_header=inherited)
+    assert [r["value"] for r in rules] == [645.0, 2000.0]  # gauge id 422035 never becomes a value
+    assert {r["rule_type"] for r in rules} == {"flow_class_threshold"}
+    assert {r["water_source"] for r in rules} == {"Boomi Zone"}
+    assert rules[1]["condition"].startswith("B Class | More than 2,000 ML/day")
+
+
+SHIFTED_CONTINUATION = """<table><tbody>
+<tr><td>A Class</td><td>1. More than 176 ML/day at Presbury gauge, and</td><td>Barwon River at Presbury gauge (416050)</td></tr>
+<tr><td></td><td>2. Less than or equal to 270 ML/day at Presbury gauge</td><td></td></tr>
+</tbody></table>"""
+
+
+def test_short_continuation_rows_align_to_the_unit_column(wsp_config, taxonomy):
+    """The spanning Management Zone cell is dropped on continuation pages, so rows arrive
+    one column short; they must line up under the inherited 4-column header."""
+    inherited = ["Column 1 Management Zone", "Column 2 Flow class",
+                 "Column 3 Flow class thresholds (ML/day)", "Column 4 Flow reference point"]
+    rules = _rules(SHIFTED_CONTINUATION, wsp_config, taxonomy, section_reference="TABLE A",
+                   inherited_header=inherited)
+    assert [r["value"] for r in rules] == [176.0, 270.0]
+    assert {r["rule_type"] for r in rules} == {"flow_class_threshold"}
+    assert {r["applies_to"] for r in rules} == {"Column 3 Flow class thresholds (ML/day)"}
+    assert all(r["water_source"] is None for r in rules)
+    assert rules[1]["condition"].startswith("A Class | ")
 
 
 def test_build_table_elements_sql_targets_parsed_docs(wsp_config):
