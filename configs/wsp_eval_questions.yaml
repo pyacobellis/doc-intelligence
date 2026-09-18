@@ -1,0 +1,64 @@
+# Evaluation question set for the WSP deployment.
+#
+# Every question here is a DRAFT seed: it exercises the harness end to end but has no
+# verified reference answer yet. Subject-matter experts should replace/extend these and
+# fill in `expected_answer` (then set status: reviewed). Questions without an
+# expected_answer still contribute retrieval metrics (plan recall, MRR, hit@k); they
+# are simply not LLM-judged.
+#
+# categories: factual | comparative | edge_case
+
+questions:
+  - id: wsp-f-001
+    category: factual
+    question: What are the flow class thresholds for the Barwon-Darling unregulated river water source?
+    expected_plans: [WSP_Barwon-Darling_Unregulated_2026]
+    expected_rule_type: flow_class_threshold
+    status: draft
+
+  - id: wsp-f-002
+    category: factual
+    question: Under what conditions must pumping cease in the Intersecting Streams water source?
+    expected_plans: [WSP_Intersecting_Streams_Unregulated_2024]
+    expected_rule_type: cease_to_pump
+    status: draft
+
+  - id: wsp-f-003
+    category: factual
+    question: What is the long-term average annual extraction limit for the Barwon-Darling plan?
+    expected_plans: [WSP_Barwon-Darling_Unregulated_2026]
+    expected_rule_type: extraction_limit
+    status: draft
+
+  - id: wsp-c-001
+    category: comparative
+    question: How do the daily access rules differ between the Barwon-Darling and Intersecting Streams plans?
+    expected_plans: [WSP_Barwon-Darling_Unregulated_2026, WSP_Intersecting_Streams_Unregulated_2024]
+    expected_rule_type: access_condition
+    status: draft
+
+  - id: wsp-c-002
+    category: comparative
+    question: Which plan places tighter restrictions on trading or dealings of access licences?
+    expected_plans: [WSP_Barwon-Darling_Unregulated_2026, WSP_Intersecting_Streams_Unregulated_2024]
+    expected_rule_type: trading_rule
+    status: draft
+
+  - id: wsp-e-001
+    category: edge_case
+    question: What are the cease-to-pump rules for the Murray River in these plans?
+    expected_plans: []
+    notes: >-
+      Not covered by either plan. A good answer says the excerpts do not address the
+      Murray River rather than inventing a rule.
+    status: draft
+
+  - id: wsp-e-002
+    category: edge_case
+    question: What is 198 ML/day a threshold for?
+    expected_plans: [WSP_Barwon-Darling_Unregulated_2026]
+    expected_rule_type: flow_class_threshold
+    notes: >-
+      Exact numeric term. Tests whether keyword/hybrid retrieval beats pure semantic
+      similarity on a query dominated by a number.
+    status: draft

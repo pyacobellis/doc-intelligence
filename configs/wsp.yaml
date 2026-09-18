@@ -1,0 +1,127 @@
+document_type: wsp
+display_name: NSW Water Sharing Plans
+
+catalog: workspace
+schema: default
+
+source:
+  volume: /Volumes/workspace/default/raw
+  file_pattern: "WSP_%"
+  # Page listing the source PDFs, polled by the change-detection agent.
+  # Leave null to disable remote discovery (manual uploads to the volume only).
+  listing_url: null
+  link_pattern: '[.]pdf$'
+
+tables:
+  parsed_docs: wsp_parsed_docs
+  chunks: wsp_chunks
+  rules: wsp_rules
+  eval_results: wsp_eval_results
+  document_versions: wsp_document_versions
+  change_log: wsp_change_log
+
+models:
+  llm: databricks-llama-4-maverick
+  embedding: databricks-gte-large-en
+
+vector_search:
+  endpoint_name: wsp-vs-endpoint
+  index_name: wsp_chunks_index
+  num_results: 5
+  query_type: HYBRID   # ANN (semantic only) or HYBRID (semantic + keyword)
+  rrf_k: 60
+
+parsing:
+  ai_parse_version: "2.0"
+
+extraction:
+  ai_extract_version: "2.1"
+  chunk_keyword_filter: [limit, flow, access, cease, threshold, extraction, environmental, compliance]
+  instructions: >-
+    Extract all water access rules, extraction limits, flow thresholds,
+    cease-to-pump conditions, and environmental requirements from NSW Water
+    Sharing Plan text. Include numeric values and units where present.
+  fields:
+    - name: water_source
+      type: string
+      description: The water source or management zone this rule applies to (e.g. Barwon River, Intersecting Streams)
+    - name: condition
+      type: string
+      description: The condition or trigger for this rule (e.g. when flow falls below X, during drought)
+    - name: value
+      type: number
+      description: Numeric value (flow rate, volume, or limit)
+    - name: unit
+      type: string
+      description: Unit of measurement (ML, GL, ML/day, ML/year, etc.)
+    - name: applies_to
+      type: string
+      description: Who or what this rule applies to (licence category, all users, etc.)
+    - name: section_reference
+      type: string
+      description: Section or clause reference if mentioned in the text
+  # Label columns in parsed tables are mapped onto rule fields by header keyword.
+  # Unmatched label columns are folded into `condition`.
+  table_field_hints:
+    water_source: [management zone, water source, river section, zone]
+    condition: [flow class, condition, trigger]
+    applies_to: [access licence, licence category, category, licence]
+
+# Canonical rule taxonomy. Order matters: the first rule type whose keywords
+# match wins during deterministic classification, so specific types go first.
+taxonomy:
+  rule_types:
+    cease_to_pump:
+      description: Conditions under which pumping or taking water must stop
+      keywords: [cease to pump, cease-to-pump, cease to take, cease-to-take]
+    flow_class_threshold:
+      description: Flow rates that define flow classes and trigger access rules
+      keywords: [flow class, threshold, commence to pump, commence-to-pump]
+    extraction_limit:
+      description: Annual or long-term limits on the volume of water that may be taken
+      keywords: [extraction limit, annual limit, long-term average annual extraction limit, ltaael, available water determination]
+    environmental_release:
+      description: Environmental water provisions and planned releases
+      keywords: [environmental water, environmental release, planned environmental water]
+    trading_rule:
+      description: Rules governing dealings and trade of access licences and allocations
+      keywords: [dealing, trade, trading, transfer, assignment]
+    access_condition:
+      description: Conditions attached to when and how water may be accessed
+      keywords: [access]
+    other:
+      description: Rules that do not fit another category
+      keywords: []
+  unit_aliases:
+    ML/day: [ml/day, ml/d, ml per day, megalitres per day, megalitre per day]
+    ML/year: [ml/year, ml/yr, ml per year, megalitres per year, megalitre per year]
+    ML: [ml, megalitre, megalitres]
+    GL: [gl, gigalitre, gigalitres]
+    kL/day: [kl/day, kilolitres per day]
+    "%": ["%", percent, per cent]
+    unit shares: [unit share, unit shares, shares]
+    ML/unit share: [ml/unit share, ml per unit share]
+    km: [km, kilometre, kilometres]
+
+qa:
+  system_prompt: >-
+    You are analysing NSW Water Sharing Plans. Answer the question using only the
+    excerpts provided. Cite the plan name for each point. If the excerpts do not
+    contain enough information, say so.
+  summary_prompt: >-
+    Summarise the key features of this NSW Water Sharing Plan in 5 bullet points.
+    Focus on water access rules, environmental water, and compliance.
+  change_summary_prompt: >-
+    You are comparing two versions of a NSW Water Sharing Plan. Describe what
+    changed between the previous and current version in plain language, grouped
+    by topic. Quote the changed clauses where useful and call out any changed
+    numeric values (limits, thresholds, volumes).
+
+eval:
+  questions_file: configs/wsp_eval_questions.yaml
+  judge_prompt: >-
+    You are grading an answer about NSW Water Sharing Plans. Compare the
+    candidate answer to the reference answer. Reply with only a JSON object
+    {"score": <number between 0 and 1>, "reason": "<one sentence>"} where 1
+    means the candidate fully matches the reference and 0 means it contradicts
+    or misses it.

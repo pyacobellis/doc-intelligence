@@ -1,0 +1,110 @@
+# Databricks Asset Bundle: packages the doc_intelligence wheel, a serverless pipeline job
+# (parse -> chunk -> index -> extract-rules) and the Streamlit app.
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev      # asks first: writes to the workspace
+#   databricks bundle run wsp_pipeline -t dev
+
+bundle:
+  name: doc_intelligence
+
+variables:
+  config_path:
+    description: Document-type config, relative to the synced bundle root
+    default: configs/wsp.yaml
+  warehouse_id:
+    description: SQL warehouse the app queries through
+    lookup:
+      warehouse: "Serverless Starter Warehouse"
+
+artifacts:
+  doc_intelligence:
+    type: whl
+    path: .
+    build: python -m pip wheel . --no-deps --wheel-dir dist
+
+sync:
+  exclude:
+    - .venv
+    - data
+    - notebooks
+    - tests
+    - .pytest_cache
+    - .databricks
+
+resources:
+  jobs:
+    wsp_pipeline:
+      name: "[${bundle.target}] doc-intel pipeline (wsp)"
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ./dist/*.whl
+      tasks:
+        - task_key: parse
+          environment_key: default
+          python_wheel_task:
+            package_name: doc_intelligence
+            entry_point: doc-intel
+            parameters: ["--config", "${workspace.file_path}/${var.config_path}", "parse"]
+        - task_key: chunk
+          depends_on: [{ task_key: parse }]
+          environment_key: default
+          python_wheel_task:
+            package_name: doc_intelligence
+            entry_point: doc-intel
+            parameters: ["--config", "${workspace.file_path}/${var.config_path}", "chunk"]
+        - task_key: index
+          depends_on: [{ task_key: chunk }]
+          environment_key: default
+          python_wheel_task:
+            package_name: doc_intelligence
+            entry_point: doc-intel
+            parameters: ["--config", "${workspace.file_path}/${var.config_path}", "index"]
+        - task_key: extract_rules
+          depends_on: [{ task_key: chunk }]
+          environment_key: default
+          python_wheel_task:
+            package_name: doc_intelligence
+            entry_point: doc-intel
+            parameters: ["--config", "${workspace.file_path}/${var.config_path}", "extract-rules"]
+
+    wsp_check_source:
+      name: "[${bundle.target}] doc-intel check source (wsp)"
+      # Enable once source.listing_url is set in configs/wsp.yaml.
+      schedule:
+        quartz_cron_expression: "0 0 6 ? * MON"
+        timezone_id: Australia/Sydney
+        pause_status: PAUSED
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ./dist/*.whl
+      tasks:
+        - task_key: check_source
+          environment_key: default
+          python_wheel_task:
+            package_name: doc_intelligence
+            entry_point: doc-intel
+            parameters: ["--config", "${workspace.file_path}/${var.config_path}", "check-source", "--apply"]
+
+  apps:
+    wsp_app:
+      name: doc-intel-wsp
+      description: Q&A, rule comparison, change log and cost view over the WSP corpus
+      source_code_path: .
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      profile: wps_doc_intel
