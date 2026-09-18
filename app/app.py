@@ -3,6 +3,7 @@ No business logic here; every panel calls a package function and renders the res
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -102,12 +103,34 @@ with rules_tab:
         st.dataframe(detail, use_container_width=True)
 
 with changes_tab:
-    st.subheader("Detected document changes")
-    try:
-        log = run_sql(f"SELECT * FROM {cfg.change_log_full_name} ORDER BY detected_at DESC LIMIT 50")
-        st.dataframe(log, use_container_width=True) if not log.empty else st.info("No changes recorded yet.")
-    except Exception:
-        st.info("No change log yet — run `doc-intel check-source --apply` once a listing URL is configured.")
+    from doc_intelligence.monitoring.registry import load_proposals
+
+    st.subheader("Change proposals (inbox)")
+    st.caption("Raised by `doc-intel check-source`. Nothing changes the corpus until a proposal is approved and applied.")
+    status_filter = st.selectbox("Status", ["proposed", "approved", "rejected", "applied", "all"], index=0)
+    proposals = load_proposals(run_sql, cfg, status=None if status_filter == "all" else status_filter)
+    if proposals.empty:
+        st.info("Nothing here.")
+    else:
+        for row in proposals.itertuples(index=False):
+            with st.expander(f"[{row.kind}] {row.display_name} — {row.status} (confidence {float(row.confidence):.2f})"):
+                st.write(f"Recommended: `{row.recommended_action}` · raised {row.created_at} · id `{row.proposal_id}`")
+                st.json(json.loads(row.evidence) if isinstance(row.evidence, str) else row.evidence, expanded=False)
+                if row.status == "proposed":
+                    approve, reject = st.columns(2)
+                    if approve.button("Approve", key=f"a-{row.proposal_id}"):
+                        run_sql(f"UPDATE {cfg.proposals_full_name} SET status = 'approved', decided_at = current_timestamp() "
+                                f"WHERE proposal_id = '{row.proposal_id}'")
+                        st.rerun()
+                    if reject.button("Reject", key=f"r-{row.proposal_id}"):
+                        run_sql(f"UPDATE {cfg.proposals_full_name} SET status = 'rejected', decided_at = current_timestamp() "
+                                f"WHERE proposal_id = '{row.proposal_id}'")
+                        st.rerun()
+                elif row.status == "approved":
+                    st.write("Apply from a terminal: `doc-intel proposals apply " + row.proposal_id + "` "
+                             "(instruments open in your browser; supporting documents are fetched directly).")
+                elif row.result:
+                    st.write(row.result)
 
 with cost_tab:
     days = st.slider("Window (days)", 1, 30, 7)

@@ -70,7 +70,9 @@ workspace. Everything else is read-only.
 | `matrix` | Rule counts per document × rule type | |
 | `compare <rule_type>` | One rule type across documents, values side by side | |
 | `eval [--retriever …] [--answers] [--write]` | Run the question set; `--answers` adds LLM answers + judge | ($) (W) |
-| `check-source [--apply]` | Poll the listing page for new/changed PDFs; `--apply` uploads them | (W) |
+| `registry seed\|list\|confirm` | Known documents on the source site; `seed` records the baseline | (W) |
+| `check-source [--dry-run] [--llm]` | Scan the site; raise proposals for new plans, new versions, new supporting docs | W |
+| `proposals list\|show\|approve\|reject\|apply` | The change inbox; `apply` opens instruments in your browser and fetches supporting docs | (W) |
 | `cost [--days N]` | AI-function DBU/cost and token usage from system tables | |
 | `new-config <type> --display-name "…"` | Scaffold a config for a new document type | |
 

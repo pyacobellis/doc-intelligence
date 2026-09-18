@@ -196,18 +196,132 @@ def cmd_eval(args, cfg):
         print(f"appended {len(frame)} rows to {cfg.eval_results_full_name}")
 
 
-def cmd_check_source(args, cfg):
-    from doc_intelligence.monitoring.change_detection import apply_changes, check_source
+def cmd_registry(args, cfg):
+    from doc_intelligence.monitoring import registry as reg
+    from doc_intelligence.monitoring.source_scan import scan_source
 
-    check = check_source(_runner(args), cfg)
-    changes = check.changes
-    print(f"new: {[v.file_name for v in changes.new]}")
-    print(f"updated: {[c.file_name for _, c in changes.updated]}")
-    print(f"unchanged: {list(changes.unchanged)}")
-    if args.apply and changes.has_changes:
-        for path in apply_changes(_client(args), _spark(args), cfg, check):
-            print(f"uploaded {path}")
-        print("re-run `pipeline` to parse the new versions")
+    runner = _runner(args)
+    if args.registry_command == "seed":
+        snapshot = scan_source(cfg)
+        entries = reg.seed_registry(snapshot, cfg)
+        existing = reg.load_registry(runner, cfg)
+        if existing and not args.force:
+            print(f"registry already has {len(existing)} entries; use --force to rebuild it from the site")
+            return
+        spark = _spark(args)
+        reg.write_registry(spark, cfg, entries)
+        reg.append_observations(spark, cfg, reg.observations_from_snapshot(snapshot))
+        confirmed = sum(e.confirmed for e in entries)
+        print(f"seeded {len(entries)} documents from {len(snapshot.region_urls)} pages "
+              f"({confirmed} confirmed/ingested, {len(entries) - confirmed} known but not ingested)")
+        return
+    entries = reg.load_registry(runner, cfg)
+    if args.registry_command == "confirm":
+        entry = entries.get(args.plan_key)
+        if entry is None:
+            raise SystemExit(f"unknown plan_key {args.plan_key!r}")
+        entry.confirmed = True
+        if args.plan_name:
+            entry.plan_name = args.plan_name
+        reg.write_registry(_spark(args), cfg, list(entries.values()))
+        print(f"confirmed {args.plan_key}" + (f" -> {args.plan_name}" if args.plan_name else ""))
+        return
+    frame = reg.registry_frame(list(entries.values()))
+    if args.unconfirmed:
+        frame = frame[~frame.confirmed]
+    _show(frame[["plan_key", "status", "confirmed", "plan_name", "instrument_id", "version_label", "last_seen"]])
+
+
+def cmd_check_source(args, cfg):
+    from doc_intelligence.monitoring import registry as reg
+    from doc_intelligence.monitoring.source_scan import scan_source
+    from doc_intelligence.monitoring.triage import enrich_with_candidates, llm_triage
+
+    runner = _runner(args)
+    registry = reg.load_registry(runner, cfg)
+    if not registry:
+        raise SystemExit("registry is empty: run `doc-intel registry seed` first to establish the baseline")
+    snapshot = scan_source(cfg)
+    existing = reg.load_proposals(runner, cfg)
+    dedupe = set(existing["dedupe_key"].astype(str)) if not existing.empty else set()
+    proposals = reg.detect_proposals(snapshot, registry, reg.load_seen_urls(runner, cfg), dedupe, cfg)
+    enrich_with_candidates(proposals, registry)
+    if args.llm and proposals:
+        llm_triage(runner, cfg, proposals, registry)
+    print(f"scanned {len(snapshot.region_urls)} pages, {len(snapshot.plans)} listings -> {len(proposals)} new proposals")
+    for p in proposals:
+        extra = ""
+        if p.evidence.get("supersedes_candidates"):
+            extra = f" | may supersede {p.evidence['supersedes_candidates'][0][0]}"
+        if p.evidence.get("llm_triage"):
+            extra += f" | llm: {p.evidence['llm_triage']['kind']} ({p.evidence['llm_triage']['reason']})"
+        print(f"  [{p.kind:14}] {p.display_name[:60]:60} conf={p.confidence:.2f} -> {p.recommended_action}{extra}")
+    if args.dry_run:
+        print("dry run: nothing recorded")
+        return
+    spark = _spark(args)
+    reg.append_observations(spark, cfg, reg.observations_from_snapshot(snapshot))
+    reg.append_proposals(spark, cfg, proposals)
+    reg.write_registry(spark, cfg, reg.touch_registry(registry, snapshot))
+    print(f"recorded; review with `doc-intel proposals list`")
+
+
+def cmd_proposals(args, cfg):
+    import json
+
+    from doc_intelligence.monitoring import registry as reg
+    from doc_intelligence.monitoring.apply import apply_instrument, apply_supporting
+
+    runner = _runner(args)
+    if args.proposals_command == "list":
+        frame = reg.load_proposals(runner, cfg, status=args.status)
+        _show(frame[["proposal_id", "status", "kind", "display_name", "confidence", "recommended_action", "created_at"]]
+              if not frame.empty else frame)
+        return
+    frame = reg.load_proposals(runner, cfg)
+    row = frame[frame.proposal_id == args.proposal_id]
+    if row.empty:
+        raise SystemExit(f"no proposal {args.proposal_id}")
+    record = row.iloc[0].to_dict()
+    evidence = json.loads(record["evidence"]) if isinstance(record["evidence"], str) else record["evidence"]
+    if args.proposals_command == "show":
+        for key in ("proposal_id", "status", "kind", "display_name", "confidence", "recommended_action", "created_at",
+                    "decision_note", "result"):
+            print(f"{key:20} {record.get(key)}")
+        print("evidence:")
+        print(json.dumps(evidence, indent=2)[:4000])
+        return
+    if args.proposals_command in ("approve", "reject"):
+        status = "approved" if args.proposals_command == "approve" else "rejected"
+        reg.set_proposal_status(_spark(args), cfg, args.proposal_id, status, note=args.note)
+        print(f"{args.proposal_id}: {status}")
+        return
+    # apply
+    if record["status"] != "approved":
+        raise SystemExit(f"proposal {args.proposal_id} is {record['status']}, not approved")
+    proposal = reg.Proposal(
+        proposal_id=record["proposal_id"], dedupe_key=record["dedupe_key"], created_at=record["created_at"],
+        kind=record["kind"], plan_key=record["plan_key"], display_name=record["display_name"],
+        confidence=float(record["confidence"]), evidence=evidence, recommended_action=record["recommended_action"],
+    )
+    w, spark = _client(args), _spark(args)
+    registry = reg.load_registry(runner, cfg)
+    if proposal.kind == "supporting_doc":
+        result = apply_supporting(w, cfg, proposal)
+    elif proposal.kind in ("new_plan", "new_version"):
+        print(f"opening {proposal.evidence.get('instrument_url')} in your browser; save the PDF to your Downloads folder")
+        result, entry = apply_instrument(w, spark, cfg, proposal, registry.get(proposal.plan_key),
+                                         timeout_seconds=args.wait)
+        registry[proposal.plan_key] = entry
+        reg.write_registry(spark, cfg, list(registry.values()))
+    else:
+        raise SystemExit(f"nothing to apply for a {proposal.kind} proposal; mark it approved/rejected only")
+    reg.set_proposal_status(spark, cfg, proposal.proposal_id, "applied", result=result.note)
+    for path in result.uploaded:
+        print(f"  {path}")
+    for path in result.archived:
+        print(f"  archived previous version -> {path}")
+    print(result.note)
 
 
 def cmd_new_config(args, cfg):
@@ -291,9 +405,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verbose", action="store_true", help="print per-question rows")
     p.set_defaults(run=cmd_eval)
 
-    p = sub.add_parser("check-source", help="poll the listing page for new/updated documents")
-    p.add_argument("--apply", action="store_true", help="upload changed documents to the volume and record versions")
+    p = sub.add_parser("registry", help="known documents on the source site")
+    rs = p.add_subparsers(dest="registry_command", required=True)
+    q = rs.add_parser("seed", help="scan the site and record every listing as the baseline (writes)")
+    q.add_argument("--force", action="store_true", help="rebuild even if the registry already exists")
+    q = rs.add_parser("list", help="show the registry")
+    q.add_argument("--unconfirmed", action="store_true", help="only entries not yet confirmed")
+    q = rs.add_parser("confirm", help="mark an entry confirmed, optionally naming its file in the volume")
+    q.add_argument("plan_key")
+    q.add_argument("--plan-name", default=None)
+    p.set_defaults(run=cmd_registry)
+
+    p = sub.add_parser("check-source", help="scan the site for new/changed documents and record proposals")
+    p.add_argument("--dry-run", action="store_true", help="print proposals without recording them")
+    p.add_argument("--llm", action="store_true", help="add an LLM opinion to new-document proposals" + COSTLY)
     p.set_defaults(run=cmd_check_source)
+
+    p = sub.add_parser("proposals", help="the change inbox")
+    ps = p.add_subparsers(dest="proposals_command", required=True)
+    q = ps.add_parser("list")
+    q.add_argument("--status", choices=["proposed", "approved", "rejected", "applied"], default=None)
+    for name in ("show", "approve", "reject", "apply"):
+        q = ps.add_parser(name)
+        q.add_argument("proposal_id")
+        if name in ("approve", "reject"):
+            q.add_argument("--note", default=None)
+        if name == "apply":
+            q.add_argument("--wait", type=int, default=300, help="seconds to wait for the browser download")
+    p.set_defaults(run=cmd_proposals)
 
     p = sub.add_parser("cost", help="AI-function DBU/cost and token usage from system tables")
     p.add_argument("--days", type=int, default=7)

@@ -28,6 +28,11 @@ source:
     what_we_heard: [what we heard, summary of submissions]
     gazette: [gazette, suspension]
   max_downloads: 20
+  # documents already in the volume, keyed by the plan_key the scanner derives from the
+  # site heading; everything else the seed finds is registered as "not yet ingested"
+  known_documents:
+    barwon_darling_unregulated_river_water_source_2026: WSP_Barwon-Darling_Unregulated_2026
+    intersecting_streams_unregulated_river_water_sources_2024: WSP_Intersecting_Streams_Unregulated_2024
 
 tables:
   parsed_docs: wsp_parsed_docs
@@ -36,6 +41,9 @@ tables:
   eval_results: wsp_eval_results
   document_versions: wsp_document_versions
   change_log: wsp_change_log
+  registry: wsp_document_registry
+  observations: wsp_source_observations
+  proposals: wsp_change_proposals
 
 models:
   llm: databricks-llama-4-maverick

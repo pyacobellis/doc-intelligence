@@ -28,6 +28,8 @@ source:
   allowed_domains: []
   supporting_kinds: {}
   max_downloads: 20
+  # documents already in the volume: plan_key (from the site heading) -> file stem
+  known_documents: {}
 
 tables:
   parsed_docs: __DOCTYPE___parsed_docs
@@ -36,6 +38,9 @@ tables:
   eval_results: __DOCTYPE___eval_results
   document_versions: __DOCTYPE___document_versions
   change_log: __DOCTYPE___change_log
+  registry: __DOCTYPE___document_registry
+  observations: __DOCTYPE___source_observations
+  proposals: __DOCTYPE___change_proposals
 
 models:
   llm: databricks-llama-4-maverick

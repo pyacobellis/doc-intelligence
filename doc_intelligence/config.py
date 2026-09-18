@@ -23,6 +23,9 @@ class SourceConfig:
     # supporting-document kind -> anchor-text keywords
     supporting_kinds: Mapping[str, tuple[str, ...]] = MappingProxyType({})
     max_downloads: int = 20
+    # plan_key (from the site heading) -> plan_name (file stem in the volume) for documents
+    # already ingested; used to seed the registry
+    known_documents: Mapping[str, str] = MappingProxyType({})
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,9 @@ class TablesConfig:
     eval_results: str
     document_versions: str
     change_log: str
+    registry: str = "document_registry"
+    observations: str = "source_observations"
+    proposals: str = "change_proposals"
 
 
 @dataclass(frozen=True)
@@ -178,6 +184,18 @@ class DocumentTypeConfig:
     def chunks_index_full_name(self) -> str:
         return self.qualified_table(self.vector_search.index_name)
 
+    @property
+    def registry_full_name(self) -> str:
+        return self.qualified_table(self.tables.registry)
+
+    @property
+    def observations_full_name(self) -> str:
+        return self.qualified_table(self.tables.observations)
+
+    @property
+    def proposals_full_name(self) -> str:
+        return self.qualified_table(self.tables.proposals)
+
 
 def load_document_type_config(path: str | Path) -> DocumentTypeConfig:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
@@ -207,6 +225,7 @@ def config_from_dict(raw: dict) -> DocumentTypeConfig:
                 {kind: tuple(keywords) for kind, keywords in (source.get("supporting_kinds") or {}).items()}
             ),
             max_downloads=int(source.get("max_downloads", 20)),
+            known_documents=MappingProxyType(dict(source.get("known_documents") or {})),
         ),
         tables=TablesConfig(**raw["tables"]),
         models=ModelsConfig(**raw["models"]),

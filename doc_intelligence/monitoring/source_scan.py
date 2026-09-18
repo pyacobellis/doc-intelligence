@@ -173,8 +173,44 @@ def fetch_html(url: str, session=None, timeout: int = 60) -> str:
     return response.text
 
 
+def merge_listings(plans: Sequence[PlanListing], anchor_prefix: str | None = None) -> list[PlanListing]:
+    """One listing per plan_key. The same plan is often listed on several region pages
+    whose sections do not agree perfectly (a neighbouring plan's link can bleed in), so
+    links are unioned and instrument links ordered by how many pages carry them."""
+    groups: dict[str, list[PlanListing]] = {}
+    for plan in plans:
+        groups.setdefault(plan.plan_key, []).append(plan)
+    merged: list[PlanListing] = []
+    for plan_key, group in groups.items():
+        first = group[0]
+        if len(group) == 1:
+            merged.append(first)
+            continue
+        counts: dict[str, int] = {}
+        order: dict[str, SourceLink] = {}
+        for plan in group:
+            for link in plan.links:
+                counts[link.url] = counts.get(link.url, 0) + 1
+                order.setdefault(link.url, link)
+        prefixed = {url for url, link in order.items()
+                    if anchor_prefix and link.text.lower().startswith(anchor_prefix.lower())}
+        ranked = sorted(order, key=lambda url: (-(counts[url] + (1 if url in prefixed else 0)), list(order).index(url)))
+        instruments = [order[url] for url in ranked if order[url].kind == "instrument"]
+        others = [order[url] for url in order if order[url].kind != "instrument"]
+        merged.append(
+            PlanListing(
+                display_name=first.display_name,
+                plan_key=plan_key,
+                page_url=first.page_url,
+                is_draft=all(plan.is_draft for plan in group),
+                links=tuple(instruments + others),
+            )
+        )
+    return merged
+
+
 def scan_source(cfg: DocumentTypeConfig, fetch: Callable[[str], str] = fetch_html) -> SourceSnapshot:
-    """Read-only: fetch the hub and its region pages, return every document listing."""
+    """Read-only: fetch the hub and its region pages, return one listing per document."""
     source = cfg.source
     if not source.listing_url:
         raise ValueError("source.listing_url is not set in the document type config")
@@ -188,7 +224,7 @@ def scan_source(cfg: DocumentTypeConfig, fetch: Callable[[str], str] = fetch_htm
         observed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         hub_url=source.listing_url,
         region_urls=tuple(regions),
-        plans=tuple(plans),
+        plans=tuple(merge_listings(plans, source.instrument_anchor_prefix)),
     )
 
 

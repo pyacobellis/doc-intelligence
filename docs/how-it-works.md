@@ -117,14 +117,42 @@ answers and an `ai_query` judge where a reference exists. Results can be appende
 `<type>_eval_results` with `--write`. Runs record the retriever and chunking variant, so
 the summary table is the arbiter for retrieval/chunking decisions.
 
-### Change detection — `check-source [--apply]`
+### Change detection — `registry`, `check-source`, `proposals`
 
-`monitoring/change_detection.py`. Discovers PDF links on `source.listing_url`, hashes each
-file, compares against `<type>_document_versions`, and reports new/updated/unchanged.
-`--apply` uploads changed files to the volume and records versions; the pipeline must then
-be re-run. `diff_texts` + `build_change_summary_sql` turn two versions of a document's
-text into an LLM-written change narrative for `<type>_change_log`. The end-to-end glue
-(snapshot → re-parse → diff → summarise → log) is not yet one command.
+Watch → propose → approve → apply. Deterministic where reliability matters, one bounded
+LLM opinion where judgement helps, and a human gate before anything touches the corpus.
+
+- **Watch** (`monitoring/source_scan.py`): the publisher's hub page links to region
+  pages; each region page has one heading per plan with a "Read:" link to the instrument
+  on legislation.nsw.gov.au (instrument id and consolidation date parsed from the URL —
+  a free version label) and links to supporting documents (background, rule summary
+  sheets, "changes" fact sheets, maps, gazette notices). The site layout is config
+  (`source.region_link_pattern`, `instrument_link_pattern`, `supporting_kinds`); the
+  scanner is generic. Plans listed on several region pages are merged, with the
+  instrument link the majority of pages agree on.
+- **Registry** (`monitoring/registry.py`, `<type>_document_registry`): the canonical
+  identity of every document the site lists — plan key, current instrument/version,
+  file name in the volume once ingested, status, confirmed flag. `registry seed` records
+  the baseline (85 WSPs from 14 pages on first run); `source.known_documents` marks the
+  ones already ingested. Every scan appends the links it saw to
+  `<type>_source_observations` — the evidence trail.
+- **Propose** (`check-source`): deltas between the site and the registry become rows in
+  `<type>_change_proposals`: `new_plan`, `new_version` (instrument id/date changed),
+  `draft`, `supporting_doc` (an unseen link), `withdrawn`. Each carries evidence and a
+  recommended action; a dedupe key stops the same proposal being raised twice. A fuzzy
+  match suggests which known document a new heading probably supersedes; `--llm` adds one
+  `ai_query` opinion per new-document proposal (`monitoring/triage.py`).
+- **Approve**: `proposals list|show|approve|reject` on the CLI, or the app's Changes tab.
+- **Apply** (`monitoring/apply.py`): supporting documents are fetched into
+  `<volume>/supporting/<plan_key>/`. Instruments live on legislation.nsw.gov.au, which
+  blocks scripted downloads (including its documented export endpoints), so `apply` opens
+  the URL in your browser, waits for the PDF to land in Downloads, uploads it under a
+  canonical name, archives the superseded file, records the version and updates the
+  registry. One click; then `pipeline` re-ingests.
+
+`diff_texts` + `build_change_summary_sql` (`monitoring/change_detection.py`) turn two
+versions of a document's text into an LLM-written change narrative; the impact step that
+maps a diff onto affected rules is next.
 
 ### Cost — `cost`
 

@@ -234,28 +234,3 @@ def record_change_log(spark, cfg: DocumentTypeConfig, frame: pd.DataFrame) -> No
     )
 
 
-@dataclass(frozen=True)
-class SourceCheck:
-    changes: ChangeSet
-    payloads: Mapping[str, bytes]  # file_name -> downloaded bytes, for applying the changes
-
-
-def check_source(run_sql: SqlRunner, cfg: DocumentTypeConfig, session=None) -> SourceCheck:
-    """Poll the configured listing page and compare each document against the last
-    recorded version. Read-only: nothing is uploaded or written here."""
-    if not cfg.source.listing_url:
-        raise ValueError("source.listing_url is not set in the document type config")
-    listing = fetch_text(cfg.source.listing_url, session=session)
-    remote_docs = discover_documents(listing, cfg.source.listing_url, cfg.source.link_pattern, cfg.source.file_pattern)
-    payloads = {doc.file_name: fetch_bytes(doc.url, session=session) for doc in remote_docs}
-    remote_versions = [version_from_bytes(doc.file_name, payloads[doc.file_name], doc.url) for doc in remote_docs]
-    return SourceCheck(detect_changes(remote_versions, load_known_versions(run_sql, cfg)), payloads)
-
-
-def apply_changes(w, spark, cfg: DocumentTypeConfig, check: SourceCheck) -> list[str]:
-    """Upload new/updated documents into the source volume and record their versions.
-    Writes to the workspace; the pipeline must be re-run afterwards to re-parse."""
-    versions = [*check.changes.new, *(current for _, current in check.changes.updated)]
-    uploaded = [upload_to_volume(w, cfg, version.file_name, check.payloads[version.file_name]) for version in versions]
-    record_versions(spark, cfg, versions)
-    return uploaded

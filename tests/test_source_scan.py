@@ -103,12 +103,36 @@ def test_scan_source_stitches_hub_and_regions_with_an_injected_fetcher(hub_html,
     assert snapshot.observed_at.endswith("+00:00")
 
 
+def test_merge_listings_unions_links_and_prefers_the_majority_instrument():
+    from doc_intelligence.monitoring.source_scan import PlanListing, SourceLink, merge_listings
+
+    read_a = SourceLink("Read: Plan A 2020", "https://legislation.nsw.gov.au/file/2020-347%2020241004.pdf",
+                        "instrument", "2020-347", "20241004")
+    bleed = SourceLink("Read: Plan B 2020", "https://legislation.nsw.gov.au/file/2020-354%2020251003.pdf",
+                       "instrument", "2020-354", "20251003")
+    sheet = SourceLink("Rule summary sheets", "https://x/sheet.pdf", "supporting:rule_summary")
+    listings = [
+        PlanListing("Plan A 2020", "plan_a_2020", "region-1", False, (bleed, sheet)),   # a neighbour's link bled in
+        PlanListing("Plan A 2020", "plan_a_2020", "region-2", False, (read_a, sheet)),
+        PlanListing("Plan A 2020", "plan_a_2020", "region-3", False, (read_a,)),
+        PlanListing("Plan C 2021", "plan_c_2021", "region-1", True, ()),
+    ]
+    merged = merge_listings(listings, anchor_prefix="Read:")
+    assert [m.plan_key for m in merged] == ["plan_a_2020", "plan_c_2021"]
+    plan_a = merged[0]
+    assert plan_a.current_instrument("Read:").instrument_id == "2020-347"   # 2 pages vs 1
+    assert {l.url for l in plan_a.links} == {read_a.url, bleed.url, sheet.url}
+    assert plan_a.page_url == "region-1" and not plan_a.is_draft
+    assert merged[1].is_draft
+
+
 @pytest.mark.integration
 def test_live_scan_of_the_department_site(wsp_config):
     """Read-only HTTP against the real source; a few seconds and no downloads."""
     snapshot = scan_source(wsp_config)
     assert len(snapshot.region_urls) >= 5
-    assert len(snapshot.plans) >= 40
+    assert len(snapshot.plans) >= 30
+    assert len({p.plan_key for p in snapshot.plans}) == len(snapshot.plans)  # merged: one per plan
     keys = set(listings_by_key(snapshot.plans))
     assert "barwon_darling_unregulated_river_water_source_2026" in keys
     print(f"\nlive: {len(snapshot.region_urls)} regions, {len(snapshot.plans)} plan listings")
